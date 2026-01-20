@@ -242,6 +242,7 @@ export function VideoCoreSettingsMenu() {
     )
 
     const [editedSubtitleDelay, setEditedSubtitleDelay] = useState(settings.subtitleDelay ?? 0)
+    const [editedSecondarySubtitleDelay, setEditedSecondarySubtitleDelay] = useState(settings.secondarySubtitleDelay ?? 0)
 
     const [subFontName, setSubFontName] = useState<string>(editedSubCustomization?.fontName || "")
 
@@ -254,6 +255,7 @@ export function VideoCoreSettingsMenu() {
         }
         if (openMenuSection === "Subtitle Delay") {
             setEditedSubtitleDelay(settings.subtitleDelay)
+            setEditedSecondarySubtitleDelay(settings.secondarySubtitleDelay ?? 0)
         }
     }, [openMenuSection, settings])
 
@@ -315,6 +317,16 @@ export function VideoCoreSettingsMenu() {
         setSettings(newSettings)
         subtitleManager?.updateSettings(newSettings)
         mediaCaptionsManager?.updateSettings(newSettings)
+    }
+
+    const handleSecondarySubtitleDelayChange = (delay: number): void => {
+        setEditedSecondarySubtitleDelay(delay)
+        const newSettings = {
+            ...settings,
+            secondarySubtitleDelay: delay,
+        }
+        setSettings(newSettings)
+        subtitleManager?.updateSettings(newSettings)
     }
 
     if (isMiniPlayer) return null
@@ -476,10 +488,26 @@ export function VideoCoreSettingsMenu() {
                     </VideoCoreMenuOption>
                     <VideoCoreMenuOption title="Subtitle Delay" icon={MdOutlineAccessTime}>
                         <p className="text-sm text-[--muted] mb-2">Positive values delay subtitles, negative values advance them.</p>
+
+                        {/* Primary delay */}
+                        <p className="text-[--muted] text-xs mt-2 mb-1">Primary Track</p>
                         <VideoCoreSettingNumberInput
                             value={editedSubtitleDelay}
                             onValueChange={(v: number) => {
                                 handleSubtitleDelayChange(v)
+                            }}
+                            step={0.1}
+                            min={-30}
+                            max={30}
+                            label="Offset (seconds)"
+                        />
+
+                        {/* Secondary delay */}
+                        <p className="text-[--muted] text-xs mt-3 mb-1">Secondary Track</p>
+                        <VideoCoreSettingNumberInput
+                            value={editedSecondarySubtitleDelay}
+                            onValueChange={(v: number) => {
+                                handleSecondarySubtitleDelayChange(v)
                             }}
                             step={0.1}
                             min={-30}

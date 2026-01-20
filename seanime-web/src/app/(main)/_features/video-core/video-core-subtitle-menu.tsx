@@ -37,6 +37,7 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
     const isFullscreen = useAtomValue(vc_isFullscreen)
     const containerElement = useAtomValue(vc_containerElement)
     const [selectedTrack, setSelectedTrack] = React.useState<number | null>(null)
+    const [selectedSecondaryTrack, setSelectedSecondaryTrack] = React.useState<number | null>(null)
 
     const setMenuOpen = useSetAtom(vc_menuOpen)
     const setMenuSectionOpen = useSetAtom(vc_menuSectionOpen)
@@ -52,6 +53,10 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
         setSelectedTrack(trackNumber)
     }
 
+    function onSecondaryTrackChange(trackNumber: number | null) {
+        setSelectedSecondaryTrack(trackNumber)
+    }
+
     const firstRender = React.useRef(true)
 
     React.useEffect(() => {
@@ -64,10 +69,12 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
             if (firstRender.current) {
                 // firstRender.current = false
                 onTrackChange(subtitleManager?.getSelectedTrackNumberOrNull?.() ?? null)
+                onSecondaryTrackChange(subtitleManager?.getSelectedSecondaryTrackNumberOrNull?.() ?? null)
             }
 
             // Listen for subtitle track changes
             subtitleManager.setTrackChangedEventListener(onTrackChange)
+            subtitleManager.setSecondaryTrackChangedEventListener(onSecondaryTrackChange)
 
             // Listen for when the subtitle tracks are mounted
             subtitleManager.setTracksLoadedEventListener(tracks => {
@@ -133,6 +140,8 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
                     className="absolute right-2 top-[calc(50%-1rem)]"
                 /></VideoCoreMenuTitle>
             <VideoCoreMenuBody>
+                {/* Primary Track - Bottom */}
+                <p className="text-[--muted] text-xs mb-1">Primary (Bottom)</p>
                 <VideoCoreSettingSelect
                     isFullscreen={isFullscreen}
                     containerElement={containerElement}
@@ -174,6 +183,41 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
                     }}
                     value={selectedTrack ?? -1}
                 />
+
+                {/* Secondary Track - Top (only for MKV subtitle tracks) */}
+                {subtitleManager && subtitleTracks.length > 1 && (
+                    <>
+                        <p className="text-[--muted] text-xs mt-3 mb-1">Secondary (Top)</p>
+                        <VideoCoreSettingSelect
+                            isFullscreen={isFullscreen}
+                            containerElement={containerElement}
+                            options={[
+                                {
+                                    label: "Off",
+                                    value: -1,
+                                },
+                                ...subtitleTracks
+                                    .filter(track => track.number !== selectedTrack) // Exclude primary track
+                                    .map(track => ({
+                                        label: `${track.label || track.language?.toUpperCase() || track.languageIETF?.toUpperCase()}`,
+                                        value: track.number,
+                                        moreInfo: track.language && track.language !== track.label
+                                            ? `${track.language.toUpperCase()}${track.codecID ? "/" + getSubtitleTrackType(track.codecID) : ``}`
+                                            : undefined,
+                                    })),
+                            ]}
+                            onValueChange={(value: number) => {
+                                if (value === -1) {
+                                    subtitleManager.setNoSecondaryTrack()
+                                    setSelectedSecondaryTrack(null)
+                                    return
+                                }
+                                subtitleManager.selectSecondaryTrack(value)
+                            }}
+                            value={selectedSecondaryTrack ?? -1}
+                        />
+                    </>
+                )}
             </VideoCoreMenuBody>
         </VideoCoreMenu>
     )

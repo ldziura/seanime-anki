@@ -44,6 +44,8 @@ export type NormalizedTrackInfo = {
 
 export type SubtitleManagerTrackSelectedEvent = CustomEvent<{ trackNumber: number, kind: "file" | "event" }>
 export type SubtitleManagerTrackDeselectedEvent = CustomEvent
+export type SubtitleManagerSecondaryTrackSelectedEvent = CustomEvent<{ trackNumber: number, kind: "file" | "event" }>
+export type SubtitleManagerSecondaryTrackDeselectedEvent = CustomEvent
 export type SubtitleManagerTrackAddedEvent = CustomEvent<{ track: NormalizedTrackInfo }>
 export type SubtitleManagerTracksLoadedEvent = CustomEvent<{ tracks: NormalizedTrackInfo[] }>
 export type SubtitleManagerDestroyedEvent = CustomEvent
@@ -52,6 +54,8 @@ export type SubtitleManagerSettingsUpdatedEvent = CustomEvent<{ settings: VideoC
 interface VideoCoreSubtitleManagerEventMap {
     "trackselected": SubtitleManagerTrackSelectedEvent
     "trackdeselected": SubtitleManagerTrackDeselectedEvent
+    "secondarytrackselected": SubtitleManagerSecondaryTrackSelectedEvent
+    "secondarytrackdeselected": SubtitleManagerSecondaryTrackDeselectedEvent
     "trackadded": SubtitleManagerTrackAddedEvent
     "tracksloaded": SubtitleManagerTracksLoadedEvent
     "destroyed": SubtitleManagerDestroyedEvent
@@ -113,9 +117,11 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
 
     private playbackInfo: VideoCore_VideoPlaybackInfo
     private currentTrackNumber: number = NO_TRACK_NUMBER
+    private secondaryTrackNumber: number = NO_TRACK_NUMBER
     private fonts: string[] = []
 
     private _onSelectedTrackChanged?: (track: number | null) => void
+    private _onSelectedSecondaryTrackChanged?: (track: number | null) => void
     private _onTracksLoaded?: (tracks: NormalizedTrackInfo[]) => void
 
     // Render mode: canvas (JASSUB) or html (DOM-based)
@@ -251,6 +257,11 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
         return this.currentTrackNumber
     }
 
+    getSelectedSecondaryTrackNumberOrNull(): number | null {
+        if (this.secondaryTrackNumber === NO_TRACK_NUMBER) return null
+        return this.secondaryTrackNumber
+    }
+
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     // Sets the track to no track.
@@ -265,8 +276,21 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
         this.dispatchEvent(event)
     }
 
+    // Sets the secondary track to no track.
+    setNoSecondaryTrack() {
+        this.secondaryTrackNumber = NO_TRACK_NUMBER
+        this._onSelectedSecondaryTrackChanged?.(NO_TRACK_NUMBER)
+
+        const event: SubtitleManagerSecondaryTrackDeselectedEvent = new CustomEvent("secondarytrackdeselected")
+        this.dispatchEvent(event)
+    }
+
     setTrackChangedEventListener(callback: (track: number | null) => void) {
         this._onSelectedTrackChanged = callback
+    }
+
+    setSecondaryTrackChangedEventListener(callback: (track: number | null) => void) {
+        this._onSelectedSecondaryTrackChanged = callback
     }
 
     setTracksLoadedEventListener(callback: ((tracks: NormalizedTrackInfo[]) => void)) {
@@ -384,6 +408,82 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
         this.dispatchEvent(selectedEvent)
     }
 
+    // Selects a secondary track by its number (for dual subtitle display in HTML mode).
+    async selectSecondaryTrack(trackNumber: number) {
+        subtitleLog.info("Secondary track selection requested", trackNumber)
+
+        if (trackNumber === NO_TRACK_NUMBER) {
+            subtitleLog.info("No secondary track selected", trackNumber)
+            this.setNoSecondaryTrack()
+            return
+        }
+
+        // Don't allow selecting the same track as primary
+        if (trackNumber === this.currentTrackNumber) {
+            subtitleLog.warning("Cannot select the same track as primary for secondary", trackNumber)
+            return
+        }
+
+        const track = this._getTracks()?.find?.(t => t.number === trackNumber)
+        subtitleLog.info("Selecting secondary track", trackNumber, track)
+
+        if (!track) {
+            subtitleLog.error("Secondary track not found", trackNumber)
+            this.setNoSecondaryTrack()
+            return
+        }
+
+        // Dispatch the selected track change event
+        this._onSelectedSecondaryTrackChanged?.(trackNumber)
+
+        this.secondaryTrackNumber = track.number
+
+        // Determine kind (file or event)
+        const fileTrack = this.fileTracks[trackNumber]
+        const kind: "file" | "event" = fileTrack ? "file" : "event"
+
+        // For file tracks, ensure the content is loaded before dispatching the event
+        if (fileTrack && !fileTrack.content) {
+            subtitleLog.info("Loading secondary file track content", trackNumber)
+            await this._loadSecondaryFileTrackContent(trackNumber, fileTrack)
+        }
+
+        const selectedEvent: SubtitleManagerSecondaryTrackSelectedEvent = new CustomEvent("secondarytrackselected", { detail: { trackNumber, kind } })
+        this.dispatchEvent(selectedEvent)
+    }
+
+    // Loads file track content for secondary track (without JASSUB rendering)
+    private async _loadSecondaryFileTrackContent(trackNumber: number, fileTrack: { info: VideoCore_VideoSubtitleTrack, content: string | null }) {
+        try {
+            if (fileTrack.info.type === "ass") {
+                // Fetch ASS content directly
+                const content = fileTrack.info.src
+                    ? await fetch(fileTrack.info.src).then(res => res.text())
+                    : (fileTrack.info.content || "")
+                this.fileTracks[trackNumber].content = content
+                subtitleLog.info("Loaded secondary ASS track content", trackNumber)
+            } else {
+                // For non-ASS formats, convert to ASS using the converter
+                if (this.fetchAndConvertToASS) {
+                    const assContent = await this.fetchAndConvertToASS(fileTrack.info.src, fileTrack.info.content)
+                    if (assContent) {
+                        this.fileTracks[trackNumber].content = assContent
+                        subtitleLog.info("Converted and loaded secondary track content", trackNumber)
+                    }
+                } else {
+                    // Fallback: try to fetch raw content for SRT/VTT which can be parsed directly
+                    const content = fileTrack.info.src
+                        ? await fetch(fileTrack.info.src).then(res => res.text())
+                        : (fileTrack.info.content || "")
+                    this.fileTracks[trackNumber].content = content
+                    subtitleLog.info("Loaded secondary raw track content", trackNumber)
+                }
+            }
+        } catch (error) {
+            subtitleLog.error("Error loading secondary file track content", error)
+        }
+    }
+
     destroy() {
         subtitleLog.info("Destroying subtitle manager")
         this.libassRenderer?.destroy()
@@ -402,6 +502,7 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
         this.pgsEventTracks = {}
         this.fileTracks = {}
         this.currentTrackNumber = NO_TRACK_NUMBER
+        this.secondaryTrackNumber = NO_TRACK_NUMBER
 
         const event: SubtitleManagerDestroyedEvent = new CustomEvent("destroyed")
         this.dispatchEvent(event)

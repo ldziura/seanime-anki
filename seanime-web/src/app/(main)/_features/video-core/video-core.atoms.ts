@@ -24,7 +24,8 @@ export type VideoCoreSettings = {
     preferredSubtitleLanguage: string
     preferredSubtitleBlacklist: string
     preferredAudioLanguage: string
-    subtitleDelay: number // in seconds
+    subtitleDelay: number // in seconds (primary track)
+    secondarySubtitleDelay: number // in seconds (secondary track)
     // Video enhancement settings
     videoEnhancement: {
         enabled: boolean
@@ -60,6 +61,7 @@ export const vc_initialSettings: VideoCoreSettings = {
     preferredSubtitleBlacklist: "",
     preferredAudioLanguage: "jpn,jp,jap,japanese",
     subtitleDelay: 0,
+    secondarySubtitleDelay: 0,
     videoEnhancement: {
         enabled: true,
         contrast: 1.05,
