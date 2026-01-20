@@ -23,11 +23,13 @@ import {
     VideoCoreMenuSubOption,
     VideoCoreMenuSubSubmenuBody,
     VideoCoreMenuTitle,
+    VideoCoreSettingNumberInput,
     VideoCoreSettingSelect,
     VideoCoreSettingTextInput,
 } from "@/app/(main)/_features/video-core/video-core-menu"
 import { videoCorePreferencesModalAtom } from "@/app/(main)/_features/video-core/video-core-preferences"
 import {
+    SubtitleRenderMode,
     vc_autoNextAtom,
     vc_autoPlayVideoAtom,
     vc_autoSkipOPEDAtom,
@@ -37,6 +39,7 @@ import {
     vc_settings,
     vc_showChapterMarkersAtom,
     vc_storedPlaybackRateAtom,
+    vc_subtitleRenderModeAtom,
     VideoCoreSettings,
 } from "@/app/(main)/_features/video-core/video-core.atoms"
 import { useServerStatus } from "@/app/(main)/_hooks/use-server-status"
@@ -220,6 +223,7 @@ export function VideoCoreSettingsMenu() {
     const [autoNext, setAutoNext] = useAtom(vc_autoNextAtom)
     const [autoPlay, setAutoPlay] = useAtom(vc_autoPlayVideoAtom)
     const [autoSkipOPED, setAutoSkipOPED] = useAtom(vc_autoSkipOPEDAtom)
+    const [subtitleRenderMode, setSubtitleRenderMode] = useAtom(vc_subtitleRenderModeAtom)
 
     const [menuOpen, setMenuOpen] = useAtom(vc_menuOpen)
     const [openMenuSection, setOpenMenuSection] = useAtom(vc_menuSectionOpen)
@@ -369,6 +373,18 @@ export function VideoCoreSettingsMenu() {
                     <VideoCoreMenuOption title="Subtitle Styles" icon={MdOutlineSubtitles}>
                         <p className="text-sm text-[--muted] mb-2">Subtitle customization will not override ASS/SSA tracks that contain multiple
                                                                    styles.</p>
+                        <p className="text-[--muted] text-sm my-2">Rendering Mode</p>
+                        <VideoCoreSettingSelect
+                            options={[
+                                { label: "Canvas (libass)", value: "canvas", description: "Styled ASS subtitle rendering" },
+                                { label: "HTML Overlay", value: "html", description: "Plain text DOM rendering for external tools" },
+                            ]}
+                            onValueChange={(v: SubtitleRenderMode) => {
+                                setSubtitleRenderMode(v)
+                            }}
+                            value={subtitleRenderMode}
+                        />
+                        <p className="text-[--muted] text-sm my-2">Style Customization</p>
                         <VideoCoreSettingSelect
                             options={[
                                 { label: "On", value: 1 },
@@ -460,36 +476,15 @@ export function VideoCoreSettingsMenu() {
                     </VideoCoreMenuOption>
                     <VideoCoreMenuOption title="Subtitle Delay" icon={MdOutlineAccessTime}>
                         <p className="text-sm text-[--muted] mb-2">Positive values delay subtitles, negative values advance them.</p>
-                        <VideoCoreSettingSelect
-                            options={[
-                                { label: "-2.0s", value: -2.0 },
-                                { label: "-1.0s", value: -1.0 },
-                                { label: "-0.9s", value: -0.9 },
-                                { label: "-0.8s", value: -0.8 },
-                                { label: "-0.7s", value: -0.7 },
-                                { label: "-0.6s", value: -0.6 },
-                                { label: "-0.5s", value: -0.5 },
-                                { label: "-0.4s", value: -0.4 },
-                                { label: "-0.3s", value: -0.3 },
-                                { label: "-0.2s", value: -0.2 },
-                                { label: "-0.1s", value: -0.1 },
-                                { label: "0s", value: 0 },
-                                { label: "0.1s", value: 0.1 },
-                                { label: "0.2s", value: 0.2 },
-                                { label: "0.3s", value: 0.3 },
-                                { label: "0.4s", value: 0.4 },
-                                { label: "0.5s", value: 0.5 },
-                                { label: "0.6s", value: 0.6 },
-                                { label: "0.7s", value: 0.7 },
-                                { label: "0.8s", value: 0.8 },
-                                { label: "0.9s", value: 0.9 },
-                                { label: "1.0s", value: 1.0 },
-                                { label: "2.0s", value: 2.0 },
-                            ]}
+                        <VideoCoreSettingNumberInput
+                            value={editedSubtitleDelay}
                             onValueChange={(v: number) => {
                                 handleSubtitleDelayChange(v)
                             }}
-                            value={editedSubtitleDelay}
+                            step={0.1}
+                            min={-30}
+                            max={30}
+                            label="Offset (seconds)"
                         />
                     </VideoCoreMenuOption>
                     <VideoCoreMenuOption title="Playback Speed" icon={MdSpeed}>

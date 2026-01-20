@@ -1,6 +1,7 @@
 import { vc_containerElement, vc_isFullscreen } from "@/app/(main)/_features/video-core/video-core"
 import { cn } from "@/components/ui/core/styling"
 import { Drawer } from "@/components/ui/drawer"
+import { NumberInput } from "@/components/ui/number-input"
 import { Popover } from "@/components/ui/popover"
 import { TextInput } from "@/components/ui/text-input"
 import { Tooltip } from "@/components/ui/tooltip"
@@ -413,6 +414,35 @@ export function VideoCoreSettingTextInput(props: VideoCoreSettingTextInputProps)
                 value={value}
                 onValueChange={onValueChange}
                 help={help}
+            />
+        </div>
+    )
+}
+
+type VideoCoreSettingNumberInputProps = {
+    value: number
+    onValueChange: (value: number) => void
+    label?: string
+    step?: number
+    min?: number
+    max?: number
+}
+
+export function VideoCoreSettingNumberInput(props: VideoCoreSettingNumberInputProps) {
+    const { value, onValueChange, label, step = 0.1, min, max } = props
+    return (
+        <div className="block" data-vc-element="setting-number-input">
+            <NumberInput
+                label={label}
+                value={value}
+                onValueChange={(v) => onValueChange(v)}
+                step={step}
+                min={min}
+                max={max}
+                allowOverflow={true}
+                clampValueOnBlur={false}
+                formatOptions={{ maximumFractionDigits: 1 }}
+                size="sm"
             />
         </div>
     )

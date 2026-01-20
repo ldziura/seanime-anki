@@ -40,6 +40,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react"
 import { UseFormReturn } from "react-hook-form"
 import { toast } from "sonner"
 import { useServerStatus } from "../../_hooks/use-server-status"
+import { useVideoCoreAnki } from "./video-core-anki"
 import { useVideoCoreScreenshot } from "./video-core-screenshot"
 
 export const videoCorePreferencesModalAtom = atom(false)
@@ -435,6 +436,26 @@ export function VideoCorePreferencesModal() {
                                         action="Take Screenshot"
                                         description="Take screenshot"
                                         actionKey="takeScreenshot"
+                                        editedKeybindings={editedKeybindings}
+                                        setEditedKeybindings={setEditedKeybindings}
+                                        recordingKey={recordingKey}
+                                        handleKeyRecord={handleKeyRecord}
+                                        formatKeyDisplay={formatKeyDisplay}
+                                    />
+                                    <KeybindingRow
+                                        action="Mine to Anki"
+                                        description="Create Anki card"
+                                        actionKey="ankiMine"
+                                        editedKeybindings={editedKeybindings}
+                                        setEditedKeybindings={setEditedKeybindings}
+                                        recordingKey={recordingKey}
+                                        handleKeyRecord={handleKeyRecord}
+                                        formatKeyDisplay={formatKeyDisplay}
+                                    />
+                                    <KeybindingRow
+                                        action="Update Last Card"
+                                        description="Update last Anki card"
+                                        actionKey="ankiUpdateLast"
                                         editedKeybindings={editedKeybindings}
                                         setEditedKeybindings={setEditedKeybindings}
                                         recordingKey={recordingKey}
@@ -839,6 +860,7 @@ export function VideoCoreKeybindingController(props: {
     }
 
     const { takeScreenshot } = useVideoCoreScreenshot()
+    const { mineToAnki, updateLastCard, isEnabled: isAnkiEnabled } = useVideoCoreAnki()
 
     //
     // Keyboard shortcuts
@@ -1015,8 +1037,14 @@ export function VideoCoreKeybindingController(props: {
         } else if (e.code === keybindings.takeScreenshot.key) {
             e.preventDefault()
             takeScreenshot()
+        } else if (e.code === keybindings.ankiMine?.key && isAnkiEnabled) {
+            e.preventDefault()
+            mineToAnki()
+        } else if (e.code === keybindings.ankiUpdateLast?.key && isAnkiEnabled) {
+            e.preventDefault()
+            updateLastCard()
         }
-    }, [keybindings, volume, muted, seek, active, fullscreen, pip, showOverlayFeedback, introEndTime, introStartTime, isKeybindingsModalOpen])
+    }, [keybindings, volume, muted, seek, active, fullscreen, pip, showOverlayFeedback, introEndTime, introStartTime, isKeybindingsModalOpen, mineToAnki, updateLastCard, isAnkiEnabled])
 
     // Keyboard shortcut handlers
     const handleNextChapter = useCallback(() => {

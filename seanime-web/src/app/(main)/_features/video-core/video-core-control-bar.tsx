@@ -28,7 +28,9 @@ import React from "react"
 import { LuChevronLeft, LuChevronRight, LuVolume, LuVolume1, LuVolume2, LuVolumeOff } from "react-icons/lu"
 import { RiPauseLargeLine, RiPlayLargeLine } from "react-icons/ri"
 import { RxEnterFullScreen, RxExitFullScreen } from "react-icons/rx"
-import { TbPictureInPicture, TbPictureInPictureOff } from "react-icons/tb"
+import { TbCards, TbPictureInPicture, TbPictureInPictureOff } from "react-icons/tb"
+import { vc_ankiSettingsAtom } from "./video-core.atoms"
+import { useVideoCoreAnki } from "./video-core-anki"
 
 const VIDEOCORE_CONTROL_BAR_MAIN_SECTION_HEIGHT = 48
 const VIDEOCORE_CONTROL_BAR_MAIN_SECTION_HEIGHT_MINI = 28
@@ -681,6 +683,25 @@ export function VideoCoreFullscreenButton() {
                 setMiniPlayer(false)
                 fullscreenManager?.toggleFullscreen()
             }}
+        />
+    )
+}
+
+export function VideoCoreAnkiMineButton() {
+    const ankiSettings = useAtomValue(vc_ankiSettingsAtom)
+    const { mineToAnki } = useVideoCoreAnki()
+    const isMiniPlayer = useAtomValue(vc_miniPlayer)
+
+    // Don't show if Anki mining is not enabled
+    if (!ankiSettings.enabled || isMiniPlayer) return null
+
+    return (
+        <VideoCoreControlButtonIcon
+            icons={[
+                ["default", TbCards],
+            ]}
+            state="default"
+            onClick={mineToAnki}
         />
     )
 }

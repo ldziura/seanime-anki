@@ -23,6 +23,7 @@ import {
 import { VideoCoreDrawer } from "@/app/(main)/_features/video-core/video-core-drawer"
 import { useVideoCoreSetupEvents } from "@/app/(main)/_features/video-core/video-core-events"
 import { vc_fullscreenManager, VideoCoreFullscreenManager } from "@/app/(main)/_features/video-core/video-core-fullscreen"
+import { HtmlSubtitleOverlay } from "@/app/(main)/_features/video-core/video-core-html-subtitles"
 import {
     useVideoCoreHls,
     vc_hlsAudioTracks,
@@ -33,6 +34,7 @@ import {
     vc_hlsSetQuality,
 } from "@/app/(main)/_features/video-core/video-core-hls"
 import { useVideoCoreIOSFullscreenSubtitles } from "@/app/(main)/_features/video-core/video-core-ios-fullscreen-subtitles"
+import { useVideoCoreAsbplayerIntegration } from "@/app/(main)/_features/video-core/video-core-asbplayer"
 import { MediaCaptionsManager } from "@/app/(main)/_features/video-core/video-core-media-captions"
 import { vc_mediaSessionManager, VideoCoreMediaSessionManager } from "@/app/(main)/_features/video-core/video-core-media-session"
 import { vc_menuOpen, vc_menuSectionOpen } from "@/app/(main)/_features/video-core/video-core-menu"
@@ -68,6 +70,7 @@ import {
     vc_storedMutedAtom,
     vc_storedPlaybackRateAtom,
     vc_storedVolumeAtom,
+    vc_subtitleRenderModeAtom,
     VideoCore_VideoPlaybackInfo,
     VideoCore_VideoSource,
     VideoCore_VideoSubtitleTrack,
@@ -400,6 +403,7 @@ const PlayerContent = React.memo<PlayerContentProps>(({
                 ref={combineContainerRef}
                 className={cn(
                     "relative w-full h-full bg-black overflow-clip flex items-center justify-center",
+                    "html5-video-player", // YouTube-like class for asbplayer detection
                     (!busy && !isMiniPlayer) && "cursor-none",
                 )}
                 onPointerMove={handleContainerPointerMove}
@@ -482,6 +486,7 @@ const PlayerContent = React.memo<PlayerContentProps>(({
                             <video
                                 data-vc-element="video"
                                 data-video-core-element
+                                className="html5-main-video" // YouTube-like class for asbplayer detection
                                 crossOrigin="anonymous"
                                 preload="auto"
                                 src={streamUrl && !streamUrl.includes(".m3u8") ? streamUrl : undefined}
@@ -526,6 +531,25 @@ const PlayerContent = React.memo<PlayerContentProps>(({
                                 ))}
                             </video>
                         </div>
+
+                        {/* HTML Subtitle Overlay - Renders subtitles as DOM elements for external tool compatibility */}
+                        <HtmlSubtitleOverlay />
+
+                        {/* External tool injection point - for browser extensions like asbplayer */}
+                        <div
+                            id="asbplayer-subtitle-container"
+                            data-vc-element="external-overlay"
+                            className="asbplayer-container"
+                            style={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: "100%",
+                                height: "100%",
+                                zIndex: 65,
+                                pointerEvents: "none",
+                            }}
+                        />
 
                         {!isMobile && <VideoCoreTopSection inline={inline}>
                             <VideoCoreTopPlaybackInfo state={state} />
@@ -1396,6 +1420,14 @@ export function VideoCore(props: VideoCoreProps) {
         }
     }, [pipManager, subtitleManager, mediaCaptionsManager, videoRef.current, state.playbackInfo])
 
+    // Update subtitle manager render mode to prevent duplicate rendering
+    const subtitleRenderMode = useAtomValue(vc_subtitleRenderModeAtom)
+    React.useEffect(() => {
+        if (subtitleManager) {
+            subtitleManager.setRenderMode(subtitleRenderMode)
+        }
+    }, [subtitleRenderMode, subtitleManager])
+
     // Update fullscreen manager
     React.useEffect(() => {
         if (fullscreenManager && containerRef.current) {
@@ -1431,6 +1463,11 @@ export function VideoCore(props: VideoCoreProps) {
                 videoRef.current.currentTime = time
             }
         },
+    })
+
+    // Handle asbplayer browser extension integration in fullscreen
+    useVideoCoreAsbplayerIntegration({
+        containerElement: containerRef.current,
     })
 
     // container events

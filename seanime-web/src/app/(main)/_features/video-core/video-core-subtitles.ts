@@ -2,7 +2,7 @@ import { getServerBaseUrl } from "@/api/client/server-url"
 import { MKVParser_SubtitleEvent, MKVParser_TrackInfo } from "@/api/generated/types"
 import { VideoCorePgsRenderer } from "@/app/(main)/_features/video-core/video-core-pgs-renderer"
 import { vc_getSubtitleStyle } from "@/app/(main)/_features/video-core/video-core-settings-menu"
-import { VideoCore_VideoPlaybackInfo, VideoCore_VideoSubtitleTrack, VideoCoreSettings } from "@/app/(main)/_features/video-core/video-core.atoms"
+import { SubtitleRenderMode, VideoCore_VideoPlaybackInfo, VideoCore_VideoSubtitleTrack, VideoCoreSettings } from "@/app/(main)/_features/video-core/video-core.atoms"
 import { logger } from "@/lib/helpers/debug"
 import { detectTrackLanguage } from "@/lib/helpers/language"
 import { getAssetUrl, legacy_getAssetUrl } from "@/lib/server/assets"
@@ -117,6 +117,9 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
 
     private _onSelectedTrackChanged?: (track: number | null) => void
     private _onTracksLoaded?: (tracks: NormalizedTrackInfo[]) => void
+
+    // Render mode: canvas (JASSUB) or html (DOM-based)
+    private renderMode: SubtitleRenderMode = "canvas"
 
     // Translation is active
     private translationTargetLang: string | null = null
@@ -368,12 +371,13 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
             // Handle regular ASS/text subtitles
             this.pgsRenderer?.clear()
 
-            // Set the track
-            this.libassRenderer?.setTrack(codecPrivate)
-            // Apply customization to Default styles
-            this._applySubtitleCustomization()
-
-            this._populateEventTrack(trackNumber)
+            // Set the track (skip JASSUB if in HTML mode)
+            if (this.renderMode !== "html") {
+                this.libassRenderer?.setTrack(codecPrivate)
+                // Apply customization to Default styles
+                this._applySubtitleCustomization()
+                this._populateEventTrack(trackNumber)
+            }
         }
 
         const selectedEvent: SubtitleManagerTrackSelectedEvent = new CustomEvent("trackselected", { detail: { trackNumber, kind: "event" } })
@@ -456,8 +460,8 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
         const { isNew, cachedEntry } = this._recordSubtitleEvent(event)
         if (!cachedEntry) return
 
-        // If the event belongs to the active track, render it
-        if (event.trackNumber === this.currentTrackNumber && this.libassRenderer && isNew) {
+        // If the event belongs to the active track, render it (skip JASSUB if in HTML mode)
+        if (event.trackNumber === this.currentTrackNumber && this.libassRenderer && isNew && this.renderMode !== "html") {
             if (this.shouldTranslate) {
                 if (cachedEntry.translatedAssEvent) {
                     // already translated, use it
@@ -476,6 +480,24 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
     setSubtitleDelay(subtitleDelay: number) {
         if (this.libassRenderer) (this.libassRenderer as any).timeOffset = (-subtitleDelay)
         if (this.pgsRenderer) this.pgsRenderer.setTimeOffset(-subtitleDelay)
+    }
+
+    setRenderMode(mode: SubtitleRenderMode) {
+        const previousMode = this.renderMode
+        this.renderMode = mode
+
+        if (mode === "html" && this.libassRenderer) {
+            // Clear JASSUB canvas when switching to HTML mode to prevent duplicate rendering
+            this.libassRenderer.setTrack(this.defaultSubtitleHeader)
+        } else if (mode === "canvas" && previousMode === "html" && this.currentTrackNumber !== NO_TRACK_NUMBER) {
+            // Reload the current track into JASSUB when switching back to canvas mode
+            subtitleLog.info("Switching back to canvas mode, reloading track", this.currentTrackNumber)
+            this.selectTrack(this.currentTrackNumber)
+        }
+    }
+
+    getRenderMode(): SubtitleRenderMode {
+        return this.renderMode
     }
 
     getFileTrack(trackNumber: number) {
@@ -576,8 +598,8 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
             Text: translated,
         }
         cached.isTranslating = false
-        // If the track is still the active one, inject the new event immediately
-        if (this.currentTrackNumber === cached.event.trackNumber && this.libassRenderer) {
+        // If the track is still the active one, inject the new event immediately (skip JASSUB if in HTML mode)
+        if (this.currentTrackNumber === cached.event.trackNumber && this.libassRenderer && this.renderMode !== "html") {
             this.libassRenderer.createEvent(cached.translatedAssEvent)
         }
     }
@@ -862,13 +884,15 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
     private _reloadCurrentTrack() {
         const track = this.currentTrackNumber
         // effectively flushes the renderer and re-adds events
-        // using the new settings logic
-        this.libassRenderer?.setTrack(this.eventTracks[track]?.info.codecPrivate?.slice(0, -1) || this.defaultSubtitleHeader)
-        this._applySubtitleCustomization()
+        // using the new settings logic (skip JASSUB if in HTML mode)
+        if (this.renderMode !== "html") {
+            this.libassRenderer?.setTrack(this.eventTracks[track]?.info.codecPrivate?.slice(0, -1) || this.defaultSubtitleHeader)
+            this._applySubtitleCustomization()
 
-        // Re-run the selection logic to populate events
-        if (this.eventTracks[track]) {
-            this._populateEventTrack(track)
+            // Re-run the selection logic to populate events
+            if (this.eventTracks[track]) {
+                this._populateEventTrack(track)
+            }
         }
 
         // Run translation logic if needed
@@ -1027,9 +1051,12 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
         // If content is already loaded, use it
         if (!!fileTrack.content) {
             subtitleLog.info("Using cached converted content for track", trackNumber)
-            this.libassRenderer?.setTrack(fileTrack.content)
-            this._applySubtitleCustomization()
-            this.libassRenderer?.resize?.()
+            // Skip JASSUB if in HTML mode
+            if (this.renderMode !== "html") {
+                this.libassRenderer?.setTrack(fileTrack.content)
+                this._applySubtitleCustomization()
+                this.libassRenderer?.resize?.()
+            }
             this.pgsRenderer?.resize()
             return
         }
@@ -1041,9 +1068,12 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
                 // fetch subtitle file content
                 const content = fileTrack.info.src ? await fetch(fileTrack.info.src).then(res => res.text()) : (fileTrack.info.content || "")
                 this.fileTracks[trackNumber].content = content // cache it
-                this.libassRenderer?.setTrack(content) // load it
-                this._applySubtitleCustomization()
-                this.libassRenderer?.resize?.()
+                // Skip JASSUB if in HTML mode
+                if (this.renderMode !== "html") {
+                    this.libassRenderer?.setTrack(content) // load it
+                    this._applySubtitleCustomization()
+                    this.libassRenderer?.resize?.()
+                }
                 this.pgsRenderer?.resize()
             }
             catch (error) {
@@ -1063,9 +1093,12 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
                 // Cache the converted content
                 this.fileTracks[trackNumber].content = assContent
                 subtitleLog.info("Loading converted ASS content")
-                this.libassRenderer?.setTrack(assContent) // load it
-                this._applySubtitleCustomization()
-                this.libassRenderer?.resize?.()
+                // Skip JASSUB if in HTML mode
+                if (this.renderMode !== "html") {
+                    this.libassRenderer?.setTrack(assContent) // load it
+                    this._applySubtitleCustomization()
+                    this.libassRenderer?.resize?.()
+                }
                 this.pgsRenderer?.resize()
             }
             catch (error) {

@@ -124,6 +124,8 @@ export interface VideoCoreKeybindings {
     increaseSpeed: { key: string; value: number }
     decreaseSpeed: { key: string; value: number }
     takeScreenshot: { key: string }
+    ankiMine: { key: string }
+    ankiUpdateLast: { key: string }
 }
 
 export const vc_defaultKeybindings: VideoCoreKeybindings = {
@@ -145,6 +147,8 @@ export const vc_defaultKeybindings: VideoCoreKeybindings = {
     increaseSpeed: { key: "BracketRight", value: 0.1 },
     decreaseSpeed: { key: "BracketLeft", value: 0.1 },
     takeScreenshot: { key: "KeyI" },
+    ankiMine: { key: "Backquote" },
+    ankiUpdateLast: { key: "Backslash" },
 }
 
 export const vc_keybindingsAtom = atomWithStorage("sea-video-core-keybindings", vc_defaultKeybindings, undefined, { getOnInit: true })
@@ -160,3 +164,42 @@ export const vc_autoSkipOPEDAtom = atomWithStorage("sea-video-core-auto-skip-op-
 export const vc_storedVolumeAtom = atomWithStorage("sea-video-core-volume", 1, undefined, { getOnInit: true })
 export const vc_storedMutedAtom = atomWithStorage("sea-video-core-muted", false, undefined, { getOnInit: true })
 export const vc_storedPlaybackRateAtom = atomWithStorage("sea-video-core-playback-rate", 1, undefined, { getOnInit: true })
+
+// Subtitle render mode: "canvas" uses libass (default), "html" uses DOM-based rendering
+export type SubtitleRenderMode = "canvas" | "html"
+export const vc_subtitleRenderModeAtom = atomWithStorage<SubtitleRenderMode>("sea-vc-subtitleRenderMode", "canvas", undefined, { getOnInit: true })
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Anki Mining Settings
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export interface AnkiSettings {
+    enabled: boolean
+    ankiConnectUrl: string
+    deckName: string
+    modelName: string
+    sentenceField: string
+    audioField: string
+    imageField: string
+    audioPaddingBefore: number // seconds before subtitle start
+    audioPaddingAfter: number // seconds after subtitle end
+}
+
+export const vc_initialAnkiSettings: AnkiSettings = {
+    enabled: false,
+    ankiConnectUrl: "http://127.0.0.1:8765",
+    deckName: "",
+    modelName: "",
+    sentenceField: "",
+    audioField: "",
+    imageField: "",
+    audioPaddingBefore: 0.25,
+    audioPaddingAfter: 0.25,
+}
+
+export const vc_ankiSettingsAtom = atomWithStorage<AnkiSettings>(
+    "sea-video-core-anki-settings",
+    vc_initialAnkiSettings,
+    undefined,
+    { getOnInit: true },
+)
