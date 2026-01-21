@@ -147,6 +147,14 @@ export const CAPTION_STYLES_FONT_SIZE_OPTIONS = [
     { label: "Extra Large", value: 6.1 },
 ]
 
+export const CAPTION_STYLES_SECONDARY_FONT_SIZE_OPTIONS = [
+    { label: "Same as Primary", value: undefined },
+    { label: "Small", value: 4 },
+    { label: "Medium", value: 5 },
+    { label: "Large", value: 5.7 },
+    { label: "Extra Large", value: 6.1 },
+]
+
 export const CAPTION_STYLES_TEXT_SHADOW_OPTIONS = [
     { label: "None", value: 0 },
     { label: "Small", value: 2 },
@@ -196,6 +204,12 @@ export function vc_getCaptionStyleLabel<T extends keyof VideoCoreSettings["capti
             return `${(vc_getCaptionStyle(settings, "backgroundOpacity") * 100).toFixed(0)}%`
     }
     return ""
+}
+
+export function vc_getSecondaryCaptionFontSizeLabel(settings: VideoCoreSettings["captionCustomization"] | undefined): string {
+    const value = settings?.secondaryFontSize
+    if (value === undefined) return "Same as Primary"
+    return CAPTION_STYLES_SECONDARY_FONT_SIZE_OPTIONS.find(o => o.value === value)?.label ?? ""
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -369,22 +383,18 @@ export function VideoCoreSettingsMenu() {
                         icon={MdOutlineAccessTime}
                         value={`${settings.subtitleDelay.toFixed(1)}s`}
                     />}
-                    {subtitleManager && <VideoCoreMenuOption
+                    {(subtitleManager || subtitleRenderMode === "html") && <VideoCoreMenuOption
                         title="Subtitle Styles"
                         icon={MdOutlineSubtitles}
-                        value={editedSubCustomization?.enabled ? `On${!!editedSubCustomization?.fontName ? ", Font" : ""}` : "Off"}
-                    />}
-                    {mediaCaptionsManager && <VideoCoreMenuOption
-                        title="Caption Styles"
-                        icon={MdOutlineSubtitles}
+                        value={subtitleRenderMode === "canvas"
+                            ? (editedSubCustomization?.enabled ? `On${!!editedSubCustomization?.fontName ? ", Font" : ""}` : "Off")
+                            : undefined}
                     />}
                     <VideoCoreMenuOption title="Player Appearance" icon={LuTvMinimalPlay} />
                     <VideoCoreMenuOption title="Preferences" icon={LuSettings2} onClick={() => setKeybindingsModelOpen(true)} />
                 </VideoCoreMenuSectionBody>
                 <VideoCoreMenuSubmenuBody>
                     <VideoCoreMenuOption title="Subtitle Styles" icon={MdOutlineSubtitles}>
-                        <p className="text-sm text-[--muted] mb-2">Subtitle customization will not override ASS/SSA tracks that contain multiple
-                                                                   styles.</p>
                         <p className="text-[--muted] text-sm my-2">Rendering Mode</p>
                         <VideoCoreSettingSelect
                             options={[
@@ -396,95 +406,96 @@ export function VideoCoreSettingsMenu() {
                             }}
                             value={subtitleRenderMode}
                         />
-                        <p className="text-[--muted] text-sm my-2">Style Customization</p>
-                        <VideoCoreSettingSelect
-                            options={[
-                                { label: "On", value: 1 },
-                                { label: "Off", value: 0 },
-                            ]}
-                            onValueChange={(v: number) => handleSubtitleCustomizationChange("enabled", v === 1)}
-                            value={editedSubCustomization.enabled ? 1 : 0}
-                        />
-                        {editedSubCustomization.enabled && <>
+
+                        {/* Canvas (libass) mode options */}
+                        {subtitleRenderMode === "canvas" && <>
+                            <p className="text-sm text-[--muted] my-2">Subtitle customization will not override ASS/SSA tracks that contain multiple
+                                                                       styles.</p>
+                            <p className="text-[--muted] text-sm my-2">Style Customization</p>
+                            <VideoCoreSettingSelect
+                                options={[
+                                    { label: "On", value: 1 },
+                                    { label: "Off", value: 0 },
+                                ]}
+                                onValueChange={(v: number) => handleSubtitleCustomizationChange("enabled", v === 1)}
+                                value={editedSubCustomization.enabled ? 1 : 0}
+                            />
+                            {editedSubCustomization.enabled && <>
+                                <p className="text-[--muted] text-sm my-2">Options</p>
+                                <VideoCoreMenuSubOption
+                                    title="Font"
+                                    icon={LuHeading}
+                                    parentId="Subtitle Styles"
+                                    value={!editedSubCustomization.fontName ? "Default" : editedSubCustomization.fontName?.slice(0,
+                                        11) + (!!editedSubCustomization.fontName?.length && editedSubCustomization.fontName?.length > 10
+                                        ? "..."
+                                        : "")}
+                                />
+                                <VideoCoreMenuSubOption
+                                    title="Font Size"
+                                    icon={VscTextSize}
+                                    parentId="Subtitle Styles"
+                                    value={vc_getSubtitleStyleLabel(settings.subtitleCustomization, "fontSize")}
+                                />
+                                <VideoCoreMenuSubOption
+                                    title="Text Color"
+                                    icon={LuPalette}
+                                    parentId="Subtitle Styles"
+                                    value={vc_getSubtitleStyleLabel(settings.subtitleCustomization, "primaryColor")}
+                                />
+                                <VideoCoreMenuSubOption
+                                    title="Outline"
+                                    icon={ImFileText}
+                                    parentId="Subtitle Styles"
+                                    value={`${vc_getSubtitleStyleLabel(settings.subtitleCustomization,
+                                        "outline")}, ${vc_getSubtitleStyleLabel(settings.subtitleCustomization, "outlineColor")}`}
+                                />
+                                <VideoCoreMenuSubOption
+                                    title="Shadow"
+                                    icon={RiShadowLine}
+                                    parentId="Subtitle Styles"
+                                    value={`${vc_getSubtitleStyleLabel(settings.subtitleCustomization,
+                                        "shadow")}, ${vc_getSubtitleStyleLabel(settings.subtitleCustomization, "backColor")}`}
+                                />
+                            </>}
+                        </>}
+
+                        {/* HTML Overlay mode options */}
+                        {subtitleRenderMode === "html" && <>
                             <p className="text-[--muted] text-sm my-2">Options</p>
                             <VideoCoreMenuSubOption
-                                title="Font"
-                                icon={LuHeading}
-                                parentId="Subtitle Styles"
-                                value={!editedSubCustomization.fontName ? "Default" : editedSubCustomization.fontName?.slice(0,
-                                    11) + (!!editedSubCustomization.fontName?.length && editedSubCustomization.fontName?.length > 10
-                                    ? "..."
-                                    : "")}
-                            />
-                            <VideoCoreMenuSubOption
-                                title="Font Size"
+                                title="Primary Font Size"
                                 icon={VscTextSize}
                                 parentId="Subtitle Styles"
-                                value={vc_getSubtitleStyleLabel(settings.subtitleCustomization, "fontSize")}
+                                value={vc_getCaptionStyleLabel(settings.captionCustomization, "fontSize")}
                             />
                             <VideoCoreMenuSubOption
-                                title="Text Color"
+                                title="Secondary Font Size"
+                                icon={VscTextSize}
+                                parentId="Subtitle Styles"
+                                value={vc_getSecondaryCaptionFontSizeLabel(settings.captionCustomization)}
+                            />
+                            <VideoCoreMenuSubOption
+                                title="Caption Text Color"
                                 icon={LuPalette}
                                 parentId="Subtitle Styles"
-                                value={vc_getSubtitleStyleLabel(settings.subtitleCustomization, "primaryColor")}
+                                value={vc_getCaptionStyleLabel(settings.captionCustomization, "textColor")}
                             />
                             <VideoCoreMenuSubOption
-                                title="Outline"
-                                icon={ImFileText}
+                                title="Caption Background"
+                                icon={LuPaintbrush}
                                 parentId="Subtitle Styles"
-                                value={`${vc_getSubtitleStyleLabel(settings.subtitleCustomization,
-                                    "outline")}, ${vc_getSubtitleStyleLabel(settings.subtitleCustomization, "outlineColor")}`}
+                                value={`${vc_getCaptionStyleLabel(settings.captionCustomization,
+                                    "backgroundOpacity")}, ${vc_getCaptionStyleLabel(settings.captionCustomization, "backgroundColor")}`}
                             />
                             <VideoCoreMenuSubOption
-                                title="Shadow"
+                                title="Caption Shadow"
                                 icon={RiShadowLine}
                                 parentId="Subtitle Styles"
-                                value={`${vc_getSubtitleStyleLabel(settings.subtitleCustomization,
-                                    "shadow")}, ${vc_getSubtitleStyleLabel(settings.subtitleCustomization, "backColor")}`}
+                                value={`${vc_getCaptionStyleLabel(settings.captionCustomization,
+                                    "textShadow")}, ${vc_getCaptionStyleLabel(settings.captionCustomization, "textShadowColor")}`}
                             />
                         </>}
-                    </VideoCoreMenuOption>
-                    <VideoCoreMenuOption title="Caption Styles" icon={MdOutlineSubtitles}>
-                        <p className="text-sm text-[--muted] mb-2">This only applies to non-ASS subtitles.</p>
-                        {/*<VideoCoreSettingSelect*/}
-                        {/*    options={[*/}
-                        {/*        { label: "On", value: 1 },*/}
-                        {/*        { label: "Off", value: 0 },*/}
-                        {/*    ]}*/}
-                        {/*    onValueChange={(v: number) => handleCaptionCustomizationChange("enabled", v === 1)}*/}
-                        {/*    value={editedCaptionCustomization.enabled ? 1 : 0}*/}
-                        {/*/>*/}
-                        {/*{editedCaptionCustomization.enabled && <>*/}
-                        <p className="text-[--muted] text-sm my-2">Options</p>
-                        <VideoCoreMenuSubOption
-                            title="Font Size"
-                            icon={VscTextSize}
-                            parentId="Caption Styles"
-                            value={vc_getCaptionStyleLabel(settings.captionCustomization, "fontSize")}
-                        />
-                        {/*<VideoCoreMenuSubOption title="Font Family" icon={LuHeading} parentId="Caption Styles" />*/}
-                        <VideoCoreMenuSubOption
-                            title="Text Color"
-                            icon={LuPalette}
-                            parentId="Caption Styles"
-                            value={vc_getCaptionStyleLabel(settings.captionCustomization, "textColor")}
-                        />
-                        <VideoCoreMenuSubOption
-                            title="Background"
-                            icon={LuPaintbrush}
-                            parentId="Caption Styles"
-                            value={`${vc_getCaptionStyleLabel(settings.captionCustomization,
-                                "backgroundOpacity")}, ${vc_getCaptionStyleLabel(settings.captionCustomization, "backgroundColor")}`}
-                        />
-                        {/*<VideoCoreMenuSubOption title="Outline" icon={ImFileText} parentId="Caption Styles" />*/}
-                        <VideoCoreMenuSubOption
-                            title="Shadow"
-                            icon={RiShadowLine}
-                            parentId="Caption Styles"
-                            value={`${vc_getCaptionStyleLabel(settings.captionCustomization,
-                                "textShadow")}, ${vc_getCaptionStyleLabel(settings.captionCustomization, "textShadowColor")}`}
-                        />
-                        {/*</>}*/}
                     </VideoCoreMenuOption>
                     <VideoCoreMenuOption title="Subtitle Delay" icon={MdOutlineAccessTime}>
                         <p className="text-sm text-[--muted] mb-2">Positive values delay subtitles, negative values advance them.</p>
@@ -694,36 +705,29 @@ export function VideoCoreSettingsMenu() {
                             value={vc_getSubtitleStyle(editedSubCustomization, "backColor")}
                         />
                     </VideoCoreMenuSubOption>
-                    <VideoCoreMenuSubOption title="Font Size" icon={VscTextSize} parentId="Caption Styles">
-                        {/*<p className="text-[--muted] text-sm mb-2">Font size as percentage of video height</p>*/}
+                    <VideoCoreMenuSubOption title="Primary Font Size" icon={VscTextSize} parentId="Subtitle Styles">
                         <VideoCoreSettingSelect
                             options={CAPTION_STYLES_FONT_SIZE_OPTIONS}
                             onValueChange={(v: number) => handleCaptionCustomizationChange("fontSize", v)}
                             value={vc_getCaptionStyle(editedCaptionCustomization, "fontSize")}
                         />
                     </VideoCoreMenuSubOption>
-                    {/*<VideoCoreMenuSubOption title="Font Family" icon={LuHeading} parentId="Caption Styles">*/}
-                    {/*    /!*<p className="text-[--muted] text-sm mb-2">Font family for captions</p>*!/*/}
-                    {/*    <VideoCoreSettingSelect*/}
-                    {/*        options={[*/}
-                    {/*            { label: "Inter", value: "Inter, Arial, sans-serif" },*/}
-                    {/*            { label: "Arial", value: "Arial, sans-serif" },*/}
-                    {/*            { label: "Courier", value: "Courier New, monospace" },*/}
-                    {/*            { label: "Georgia", value: "Georgia, serif" },*/}
-                    {/*            { label: "Times", value: "Times New Roman, serif" },*/}
-                    {/*        ]}*/}
-                    {/*        onValueChange={(v: string) => handleCaptionCustomizationChange("fontFamily", v)}*/}
-                    {/*        value={editedCaptionCustomization.fontFamily ?? "Inter, Arial, sans-serif"}*/}
-                    {/*    />*/}
-                    {/*</VideoCoreMenuSubOption>*/}
-                    <VideoCoreMenuSubOption title="Text Color" icon={LuPalette} parentId="Caption Styles">
+                    <VideoCoreMenuSubOption title="Secondary Font Size" icon={VscTextSize} parentId="Subtitle Styles">
+                        <p className="text-[--muted] text-sm mb-2">Font size for the secondary (top) subtitle track</p>
+                        <VideoCoreSettingSelect
+                            options={CAPTION_STYLES_SECONDARY_FONT_SIZE_OPTIONS}
+                            onValueChange={(v: number | undefined) => handleCaptionCustomizationChange("secondaryFontSize", v)}
+                            value={editedCaptionCustomization.secondaryFontSize}
+                        />
+                    </VideoCoreMenuSubOption>
+                    <VideoCoreMenuSubOption title="Caption Text Color" icon={LuPalette} parentId="Subtitle Styles">
                         <VideoCoreSettingSelect
                             options={CAPTION_STYLES_COLOR_OPTIONS}
                             onValueChange={(v: string) => handleCaptionCustomizationChange("textColor", v)}
                             value={vc_getCaptionStyle(editedCaptionCustomization, "textColor")}
                         />
                     </VideoCoreMenuSubOption>
-                    <VideoCoreMenuSubOption title="Background" icon={LuPaintbrush} parentId="Caption Styles">
+                    <VideoCoreMenuSubOption title="Caption Background" icon={LuPaintbrush} parentId="Subtitle Styles">
                         <p className="text-[--muted] text-sm my-2">Background Opacity</p>
                         <VideoCoreSettingSelect
                             options={CAPTION_STYLES_BACKGROUND_OPACITY_OPTIONS}
@@ -737,7 +741,7 @@ export function VideoCoreSettingsMenu() {
                             value={vc_getCaptionStyle(editedCaptionCustomization, "backgroundColor")}
                         />
                     </VideoCoreMenuSubOption>
-                    <VideoCoreMenuSubOption title="Shadow" icon={RiShadowLine} parentId="Caption Styles">
+                    <VideoCoreMenuSubOption title="Caption Shadow" icon={RiShadowLine} parentId="Subtitle Styles">
                         <p className="text-[--muted] text-sm mb-2">Text shadow</p>
                         <VideoCoreSettingSelect
                             options={CAPTION_STYLES_TEXT_SHADOW_OPTIONS}

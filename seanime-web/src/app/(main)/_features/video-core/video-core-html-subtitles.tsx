@@ -329,24 +329,31 @@ export function HtmlSubtitleOverlay({ className }: HtmlSubtitleOverlayProps) {
     const captionSettings = settings.captionCustomization
 
     // Common cue style
-    const getCueStyle = (isSecondary: boolean = false): React.CSSProperties => ({
-        display: "inline-block",
-        padding: "0.5rem 0.75rem",
-        borderRadius: "0.25rem",
-        backgroundColor: `rgba(0, 0, 0, ${captionSettings?.backgroundOpacity ?? 0.7})`,
-        color: captionSettings?.textColor ?? "#FFFFFF",
-        fontSize: `${captionSettings?.fontSize ?? 5}vh`,
-        textShadow: captionSettings?.textShadow
-            ? `${captionSettings.textShadow}px ${captionSettings.textShadow}px ${captionSettings.textShadow}px ${captionSettings.textShadowColor ?? "#000000"}`
-            : "2px 2px 4px rgba(0, 0, 0, 0.8)",
-        whiteSpace: "pre-wrap",
-        maxWidth: "90%",
-        margin: "0 auto",
-        fontFamily: "inherit",
-        pointerEvents: "auto",
-        userSelect: "text",
-        cursor: "text",
-    })
+    const getCueStyle = (isSecondary: boolean = false): React.CSSProperties => {
+        // Use secondary font size if set, otherwise fall back to primary font size
+        const fontSize = isSecondary
+            ? (captionSettings?.secondaryFontSize ?? captionSettings?.fontSize ?? 5)
+            : (captionSettings?.fontSize ?? 5)
+
+        return {
+            display: "inline-block",
+            padding: "0.5rem 0.75rem",
+            borderRadius: "0.25rem",
+            backgroundColor: `rgba(0, 0, 0, ${captionSettings?.backgroundOpacity ?? 0.7})`,
+            color: captionSettings?.textColor ?? "#FFFFFF",
+            fontSize: `${fontSize}vh`,
+            textShadow: captionSettings?.textShadow
+                ? `${captionSettings.textShadow}px ${captionSettings.textShadow}px ${captionSettings.textShadow}px ${captionSettings.textShadowColor ?? "#000000"}`
+                : "2px 2px 4px rgba(0, 0, 0, 0.8)",
+            whiteSpace: "pre-wrap",
+            maxWidth: "90%",
+            margin: "0 auto",
+            fontFamily: "inherit",
+            pointerEvents: "auto",
+            userSelect: "text",
+            cursor: "text",
+        }
+    }
 
     return (
         <>

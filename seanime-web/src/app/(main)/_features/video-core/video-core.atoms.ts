@@ -48,6 +48,7 @@ export type VideoCoreSettings = {
     // Caption customization settings (non-ASS)
     captionCustomization: {
         fontSize?: number
+        secondaryFontSize?: number // Independent font size for secondary track (undefined = same as primary)
         textColor?: string
         backgroundColor?: string
         backgroundOpacity?: number
