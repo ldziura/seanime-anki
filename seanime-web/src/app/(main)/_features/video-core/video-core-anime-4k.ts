@@ -7,6 +7,7 @@ import {
     vc_seeking,
     vc_videoElement,
 } from "@/app/(main)/_features/video-core/video-core"
+import { vc_anime4kComparisonEnabledAtom } from "@/app/(main)/_features/video-core/video-core-anime-4k-comparison.atoms"
 import { Anime4KOption } from "@/app/(main)/_features/video-core/video-core-anime-4k-manager"
 import { logger } from "@/lib/helpers/debug"
 import { useAtomValue } from "jotai"
@@ -19,6 +20,7 @@ const log = logger("VIDEO CORE ANIME 4K")
 export const vc_anime4kOption = atomWithStorage<Anime4KOption>("sea-video-core-anime4k", "off", undefined, { getOnInit: true })
 
 export const VideoCoreAnime4K = () => {
+    const comparisonEnabled = useAtomValue(vc_anime4kComparisonEnabledAtom)
     const realVideoSize = useAtomValue(vc_realVideoSize)
     const seeking = useAtomValue(vc_seeking)
     const isMiniPlayer = useAtomValue(vc_miniPlayer)
@@ -28,6 +30,11 @@ export const VideoCoreAnime4K = () => {
 
     const manager = useAtomValue(vc_anime4kManager)
     const [selectedOption] = useAtom(vc_anime4kOption)
+
+    // Disable single mode when comparison mode is active
+    if (comparisonEnabled) {
+        return null
+    }
 
     // Update manager with real video size
     React.useEffect(() => {

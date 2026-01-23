@@ -6,6 +6,7 @@ import { useGetTorrentstreamSettings } from "@/api/hooks/torrentstream.hooks"
 import { CustomLibraryBanner } from "@/app/(main)/(library)/_containers/custom-library-banner"
 import { __issueReport_overlayOpenAtom } from "@/app/(main)/_features/issue-report/issue-report"
 import { useServerDisabledFeatures, useServerStatus, useSetServerStatus } from "@/app/(main)/_hooks/use-server-status"
+import { Anime4KComparisonSettings } from "@/app/(main)/settings/_components/anime4k-comparison-settings"
 import { ExternalPlayerLinkSettings, MediaplayerSettings } from "@/app/(main)/settings/_components/mediaplayer-settings"
 import { PlaybackSettings } from "@/app/(main)/settings/_components/playback-settings"
 import { __settings_tabAtom } from "@/app/(main)/settings/_components/settings-page.atoms"
@@ -584,6 +585,8 @@ export default function Page() {
                                                 help="Add non-downloaded shows that are in your currently watching list to the anime library."
                                             />
                                         </SettingsCard>
+
+                                        <Anime4KComparisonSettings />
 
                                         <SettingsSubmitButton isPending={isPending} />
 

@@ -7,6 +7,9 @@ import { useNakamaWatchParty } from "@/app/(main)/_features/nakama/nakama-manage
 import { nativePlayer_initialState, nativePlayer_stateAtom } from "@/app/(main)/_features/native-player/native-player.atoms"
 import { AniSkipTime } from "@/app/(main)/_features/sea-media-player/aniskip"
 import { vc_anime4kOption, VideoCoreAnime4K } from "@/app/(main)/_features/video-core/video-core-anime-4k"
+import { vc_anime4kComparisonEnabledAtom } from "@/app/(main)/_features/video-core/video-core-anime-4k-comparison.atoms"
+import { VideoCoreAnime4KComparisonManager } from "@/app/(main)/_features/video-core/video-core-anime-4k-comparison-manager"
+import { VideoCoreAnime4KComparison } from "@/app/(main)/_features/video-core/video-core-anime-4k-comparison"
 import { Anime4KOption, VideoCoreAnime4KManager } from "@/app/(main)/_features/video-core/video-core-anime-4k-manager"
 import { VideoCoreAudioManager } from "@/app/(main)/_features/video-core/video-core-audio"
 import { VideoCoreAudioMenu } from "@/app/(main)/_features/video-core/video-core-audio-menu"
@@ -169,6 +172,7 @@ export const vc_mediaCaptionsManager = atom<MediaCaptionsManager | null>(null)
 export const vc_audioManager = atom<VideoCoreAudioManager | null>(null)
 export const vc_previewManager = atom<VideoCorePreviewManager | null>(null)
 export const vc_anime4kManager = atom<VideoCoreAnime4KManager | null>(null)
+export const vc_anime4kComparisonManager = atom<VideoCoreAnime4KComparisonManager | null>(null)
 
 export const vc_previousPausedState = atom(false)
 
@@ -260,6 +264,7 @@ export function VideoCoreProvider(props: { id: string, children: React.ReactNode
                 vc_audioManager,
                 vc_previewManager,
                 vc_anime4kManager,
+                vc_anime4kComparisonManager,
                 vc_pipManager,
                 vc_fullscreenManager,
                 vc_mediaSessionManager,
@@ -747,6 +752,8 @@ export function VideoCore(props: VideoCoreProps) {
     const [audioManager, setAudioManager] = useAtom(vc_audioManager)
     const [previewManager, setPreviewManager] = useAtom(vc_previewManager)
     const [anime4kManager, setAnime4kManager] = useAtom(vc_anime4kManager)
+    const [anime4kComparisonManager, setAnime4kComparisonManager] = useAtom(vc_anime4kComparisonManager)
+    const anime4kComparisonEnabled = useAtomValue(vc_anime4kComparisonEnabledAtom)
     const [pipManager, setPipManager] = useAtom(vc_pipManager)
     const setPipElement = useSetAtom(vc_pipElement)
     const [fullscreenManager, setFullscreenManager] = useAtom(vc_fullscreenManager)
@@ -918,6 +925,8 @@ export function VideoCore(props: VideoCoreProps) {
             setAudioManager(null)
             anime4kManager?.destroy?.()
             setAnime4kManager(null)
+            anime4kComparisonManager?.destroy?.()
+            setAnime4kComparisonManager(null)
             pipManager?.destroy?.()
             setPipManager(null)
             setPipElement(null)
@@ -1102,6 +1111,18 @@ export function VideoCore(props: VideoCoreProps) {
                 },
                 onOptionChanged: (opt) => {
                     setAnime4kOption(opt)
+                },
+            })
+        })
+
+        // Initialize Anime4K Comparison manager
+        setAnime4kComparisonManager(p => {
+            if (p) p.destroy()
+            return new VideoCoreAnime4KComparisonManager({
+                videoElement: v!,
+                settings: settings,
+                onFallback: (message) => {
+                    showOverlayFeedback({ message, duration: 2000 })
                 },
             })
         })
@@ -1522,7 +1543,8 @@ export function VideoCore(props: VideoCoreProps) {
     if (inline) {
         return (
             <ScopeProvider atoms={[__torrentSearch_selectionAtom, __torrentSearch_selectionEpisodeAtom, __torrentSearch_selectedTorrentsAtom]}>
-                <VideoCoreAnime4K />
+                {!anime4kComparisonEnabled && <VideoCoreAnime4K />}
+                <VideoCoreAnime4KComparison />
                 <VideoCorePreferencesModal />
                 {fullscreen && <RemoveScrollBar />}
                 <div
@@ -1570,7 +1592,8 @@ export function VideoCore(props: VideoCoreProps) {
         <>
             <ScopeProvider atoms={[__torrentSearch_selectionAtom, __torrentSearch_selectionEpisodeAtom, __torrentSearch_selectedTorrentsAtom]}>
 
-                <VideoCoreAnime4K />
+                {!anime4kComparisonEnabled && <VideoCoreAnime4K />}
+                <VideoCoreAnime4KComparison />
                 <VideoCorePreferencesModal />
                 {state.active && !isMiniPlayer && <RemoveScrollBar />}
 
