@@ -206,3 +206,61 @@ export const vc_ankiSettingsAtom = atomWithStorage<AnkiSettings>(
     undefined,
     { getOnInit: true },
 )
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Persistent Subtitle Offsets
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Storage structure: mediaId -> episodeNumber -> languageCode -> offset (seconds)
+export type SubtitleOffsetStorage = {
+    [mediaId: number]: {
+        [episodeNumber: number]: {
+            [languageCode: string]: number
+        }
+    }
+}
+
+export const vc_subtitleOffsetsAtom = atomWithStorage<SubtitleOffsetStorage>(
+    "sea-subtitle-offsets",
+    {},
+    undefined,
+    { getOnInit: true },
+)
+
+// Current playback info for settings components to access mediaId/episodeNumber
+export type CurrentPlaybackContext = {
+    mediaId: number | null
+    episodeNumber: number | null
+}
+
+export const vc_currentPlaybackContextAtom = atom<CurrentPlaybackContext>({
+    mediaId: null,
+    episodeNumber: null,
+})
+
+// Helper function to look up saved offset with inheritance from previous episodes
+export function getSubtitleOffset(
+    storage: SubtitleOffsetStorage,
+    mediaId: number | null,
+    episodeNumber: number | null,
+    language: string | null,
+): number {
+    if (!mediaId || !episodeNumber || !language) return 0
+
+    const mediaOffsets = storage[mediaId]
+    if (!mediaOffsets) return 0
+
+    // Check current episode first
+    if (mediaOffsets[episodeNumber]?.[language] !== undefined) {
+        return mediaOffsets[episodeNumber][language]
+    }
+
+    // Inherit from most recent previous episode
+    for (let ep = episodeNumber - 1; ep >= 1; ep--) {
+        if (mediaOffsets[ep]?.[language] !== undefined) {
+            return mediaOffsets[ep][language]
+        }
+    }
+
+    return 0
+}

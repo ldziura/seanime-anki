@@ -29,19 +29,23 @@ import {
 } from "@/app/(main)/_features/video-core/video-core-menu"
 import { videoCorePreferencesModalAtom } from "@/app/(main)/_features/video-core/video-core-preferences"
 import {
+    getSubtitleOffset,
     SubtitleRenderMode,
     vc_autoNextAtom,
     vc_autoPlayVideoAtom,
     vc_autoSkipOPEDAtom,
     vc_beautifyImageAtom,
+    vc_currentPlaybackContextAtom,
     vc_highlightOPEDChaptersAtom,
     vc_initialSettings,
     vc_settings,
     vc_showChapterMarkersAtom,
     vc_storedPlaybackRateAtom,
+    vc_subtitleOffsetsAtom,
     vc_subtitleRenderModeAtom,
     VideoCoreSettings,
 } from "@/app/(main)/_features/video-core/video-core.atoms"
+import { detectTrackLanguage } from "@/lib/helpers/language"
 import { useServerStatus } from "@/app/(main)/_hooks/use-server-status"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -249,6 +253,10 @@ export function VideoCoreSettingsMenu() {
 
     const [settings, setSettings] = useAtom(vc_settings)
 
+    // Subtitle offset storage for per-media/episode/language persistence
+    const [subtitleOffsets, setSubtitleOffsets] = useAtom(vc_subtitleOffsetsAtom)
+    const currentPlaybackContext = useAtomValue(vc_currentPlaybackContextAtom)
+
     const [editedSubCustomization, setEditedSubCustomization] = useState<VideoCoreSettings["subtitleCustomization"]>(
         settings.subtitleCustomization || vc_initialSettings.subtitleCustomization,
     )
@@ -333,6 +341,26 @@ export function VideoCoreSettingsMenu() {
         setSettings(newSettings)
         subtitleManager?.updateSettings(newSettings)
         mediaCaptionsManager?.updateSettings(newSettings)
+
+        // Save per-media/episode/language offset
+        const { mediaId, episodeNumber } = currentPlaybackContext
+        const track = subtitleManager?.getTrack(subtitleManager?.getSelectedTrackNumberOrNull?.())
+            ?? mediaCaptionsManager?.getSelectedTrack()
+        if (mediaId && episodeNumber && track) {
+            const language = detectTrackLanguage(track)
+            if (language) {
+                setSubtitleOffsets(prev => ({
+                    ...prev,
+                    [mediaId]: {
+                        ...prev[mediaId],
+                        [episodeNumber]: {
+                            ...prev[mediaId]?.[episodeNumber],
+                            [language]: delay,
+                        },
+                    },
+                }))
+            }
+        }
     }
 
     const handleSecondarySubtitleDelayChange = (delay: number): void => {
@@ -343,6 +371,27 @@ export function VideoCoreSettingsMenu() {
         }
         setSettings(newSettings)
         subtitleManager?.updateSettings(newSettings)
+
+        // Save per-media/episode/language offset for secondary track
+        const { mediaId, episodeNumber } = currentPlaybackContext
+        const track = subtitleManager?.getTrack(subtitleManager?.getSelectedSecondaryTrackNumberOrNull?.())
+        if (mediaId && episodeNumber && track) {
+            const language = detectTrackLanguage(track)
+            if (language) {
+                // Use a different key pattern for secondary tracks to distinguish them
+                const secondaryKey = `${language}_secondary`
+                setSubtitleOffsets(prev => ({
+                    ...prev,
+                    [mediaId]: {
+                        ...prev[mediaId],
+                        [episodeNumber]: {
+                            ...prev[mediaId]?.[episodeNumber],
+                            [secondaryKey]: delay,
+                        },
+                    },
+                }))
+            }
+        }
     }
 
     if (isMiniPlayer) return null
@@ -510,8 +559,8 @@ export function VideoCoreSettingsMenu() {
                                 handleSubtitleDelayChange(v)
                             }}
                             step={0.1}
-                            min={-30}
-                            max={30}
+                            min={-3600}
+                            max={3600}
                             label="Offset (seconds)"
                         />
 
@@ -523,8 +572,8 @@ export function VideoCoreSettingsMenu() {
                                 handleSecondarySubtitleDelayChange(v)
                             }}
                             step={0.1}
-                            min={-30}
-                            max={30}
+                            min={-3600}
+                            max={3600}
                             label="Offset (seconds)"
                         />
                     </VideoCoreMenuOption>

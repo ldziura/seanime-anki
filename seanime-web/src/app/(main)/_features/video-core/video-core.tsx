@@ -69,6 +69,7 @@ import {
     vc_autoPlayVideoAtom,
     vc_autoSkipOPEDAtom,
     vc_beautifyImageAtom,
+    vc_currentPlaybackContextAtom,
     vc_settings,
     vc_storedMutedAtom,
     vc_storedPlaybackRateAtom,
@@ -291,6 +292,7 @@ export function VideoCoreProvider(props: { id: string, children: React.ReactNode
                 vc_isSwiping,
                 vc_isMobile,
                 vc_swipeSeekTime,
+                vc_currentPlaybackContextAtom,
             ]}
         >
             {children}
@@ -827,6 +829,19 @@ export function VideoCore(props: VideoCoreProps) {
         qc.invalidateQueries({ queryKey: [API_ENDPOINTS.CONTINUITY.GetContinuityWatchHistoryItem.key] })
 
     }, [state.playbackInfo?.id])
+
+    // Update current playback context for subtitle offset storage
+    const setCurrentPlaybackContext = useSetAtom(vc_currentPlaybackContextAtom)
+    React.useEffect(() => {
+        if (state.playbackInfo) {
+            setCurrentPlaybackContext({
+                mediaId: state.playbackInfo.media?.id ?? null,
+                episodeNumber: state.playbackInfo.episode?.progressNumber ?? null,
+            })
+        } else {
+            setCurrentPlaybackContext({ mediaId: null, episodeNumber: null })
+        }
+    }, [state.playbackInfo?.id, state.playbackInfo?.media?.id, state.playbackInfo?.episode?.progressNumber])
 
 
     // Re-focus the video element when playback info changes
