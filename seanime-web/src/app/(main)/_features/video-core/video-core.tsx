@@ -1180,14 +1180,6 @@ export function VideoCore(props: VideoCoreProps) {
          * File subtitle tracks that don't use libass renderer
          */
         const nonLibassSubtitleTracks = state.playbackInfo?.subtitleTracks?.filter(t => !t.useLibassRenderer)
-        console.log("🔍[SUB-DEBUG init]", {
-            rawSubtitleTracks: state.playbackInfo?.subtitleTracks,
-            rawCount: state.playbackInfo?.subtitleTracks?.length ?? 0,
-            useLibassRendererValues: state.playbackInfo?.subtitleTracks?.map(t => t.useLibassRenderer),
-            nonLibassCount: nonLibassSubtitleTracks?.length ?? 0,
-            mkvMetadata: !!state.playbackInfo?.mkvMetadata,
-            branch: (nonLibassSubtitleTracks && nonLibassSubtitleTracks.length > 0) ? "mediaCaptions" : "subtitleManager(libass)",
-        })
         if (nonLibassSubtitleTracks && nonLibassSubtitleTracks.length > 0) {
             setSubtitleManager(p => {
                 if (p) p.destroy()

@@ -179,16 +179,6 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
     const activeManager = subtitleManager || mediaCaptionsManager
     const activeTracks = subtitleManager ? subtitleTracks : mediaCaptionsTracks
 
-    console.log("🔍[SUB-DEBUG menu]", {
-        subtitleManager: !!subtitleManager,
-        mediaCaptionsManager: !!mediaCaptionsManager,
-        subtitleTracksLen: subtitleTracks.length,
-        mediaCaptionsTracksLen: mediaCaptionsTracks.length,
-        activeTracksLen: activeTracks?.length,
-        isMiniPlayer,
-        willHideButton: isMiniPlayer || !activeTracks?.length,
-    })
-
     if (isMiniPlayer || !activeTracks?.length) return null
 
     return (
