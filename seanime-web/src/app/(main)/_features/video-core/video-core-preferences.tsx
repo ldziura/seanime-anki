@@ -43,6 +43,7 @@ import { UseFormReturn } from "react-hook-form"
 import { toast } from "sonner"
 import { z } from "zod"
 import { useServerStatus } from "../../_hooks/use-server-status"
+import { useVideoCoreAnki } from "./video-core-anki"
 import { useVideoCoreScreenshot } from "./video-core-screenshot"
 
 export const videoCorePreferencesModalAtom = atom(false)
@@ -482,6 +483,26 @@ export function VideoCorePreferencesModal({ isWebPlayer }: { isWebPlayer: boolea
                                         handleKeyRecord={handleKeyRecord}
                                         formatKeyDisplay={formatKeyDisplay}
                                     />
+                                    <KeybindingRow
+                                        action="Mine to Anki"
+                                        description="Create Anki card"
+                                        actionKey="ankiMine"
+                                        editedKeybindings={editedKeybindings}
+                                        setEditedKeybindings={setEditedKeybindings}
+                                        recordingKey={recordingKey}
+                                        handleKeyRecord={handleKeyRecord}
+                                        formatKeyDisplay={formatKeyDisplay}
+                                    />
+                                    <KeybindingRow
+                                        action="Update Last Card"
+                                        description="Update last Anki card"
+                                        actionKey="ankiUpdateLast"
+                                        editedKeybindings={editedKeybindings}
+                                        setEditedKeybindings={setEditedKeybindings}
+                                        recordingKey={recordingKey}
+                                        handleKeyRecord={handleKeyRecord}
+                                        formatKeyDisplay={formatKeyDisplay}
+                                    />
                                 </div>
                             </div>
 
@@ -911,6 +932,7 @@ export function VideoCoreKeybindingController(props: {
     }
 
     const { takeScreenshot } = useVideoCoreScreenshot()
+    const { mineToAnki, updateLastCard, isEnabled: isAnkiEnabled } = useVideoCoreAnki()
 
     //
     // Keyboard shortcuts
@@ -1110,10 +1132,18 @@ export function VideoCoreKeybindingController(props: {
                 const newRate = Math.max(0.20, video.playbackRate - keybindings.decreaseSpeed.value)
                 video.playbackRate = newRate
                 showOverlayFeedback({ message: `Speed: ${newRate.toFixed(2)}x` })
+            } else if (e.code === keybindings.ankiMine?.key && isAnkiEnabled) {
+                // Custom: Anki mining keybinding
+                e.preventDefault()
+                mineToAnki()
+            } else if (e.code === keybindings.ankiUpdateLast?.key && isAnkiEnabled) {
+                // Custom: Anki update-last-card keybinding
+                e.preventDefault()
+                updateLastCard()
             }
         },
         [keybindings, volume, muted, seek, active, fullscreen, pip, showOverlayFeedback, introEndTime, introStartTime, isKeybindingsModalOpen,
-            toggleInSight, videoElement, isMiniPlayer, setMiniPlayer])
+            toggleInSight, videoElement, isMiniPlayer, setMiniPlayer, mineToAnki, updateLastCard, isAnkiEnabled])
 
     // Keyboard shortcut handlers
     const handleNextChapter = useCallback(() => {

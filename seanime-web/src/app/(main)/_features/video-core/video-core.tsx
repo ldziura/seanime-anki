@@ -7,6 +7,9 @@ import { useNakamaWatchParty } from "@/app/(main)/_features/nakama/nakama-manage
 import { nativePlayer_initialState, nativePlayer_stateAtom } from "@/app/(main)/_features/native-player/native-player.atoms"
 import { type NormalizedSkipData } from "@/app/(main)/_features/video-core/_lib/aniskip.utils"
 import { vc_anime4kOption, VideoCoreAnime4K } from "@/app/(main)/_features/video-core/video-core-anime-4k"
+import { vc_anime4kComparisonEnabledAtom } from "@/app/(main)/_features/video-core/video-core-anime-4k-comparison.atoms"
+import { VideoCoreAnime4KComparisonManager } from "@/app/(main)/_features/video-core/video-core-anime-4k-comparison-manager"
+import { VideoCoreAnime4KComparison } from "@/app/(main)/_features/video-core/video-core-anime-4k-comparison"
 import { Anime4KOption, VideoCoreAnime4KManager } from "@/app/(main)/_features/video-core/video-core-anime-4k-manager"
 import { vc_menuOpen } from "@/app/(main)/_features/video-core/video-core-atoms"
 import { vc_menuSectionOpen } from "@/app/(main)/_features/video-core/video-core-atoms"
@@ -56,6 +59,7 @@ import {
 import { VideoCoreDrawer } from "@/app/(main)/_features/video-core/video-core-drawer"
 import { useVideoCoreSetupEvents } from "@/app/(main)/_features/video-core/video-core-events"
 import { vc_fullscreenManager, VideoCoreFullscreenManager } from "@/app/(main)/_features/video-core/video-core-fullscreen"
+import { HtmlSubtitleOverlay } from "@/app/(main)/_features/video-core/video-core-html-subtitles"
 import {
     useVideoCoreHls,
     vc_hlsAudioTracks,
@@ -69,6 +73,7 @@ import { vc_inSight_data } from "@/app/(main)/_features/video-core/video-core-in
 import { vc_inSight_open } from "@/app/(main)/_features/video-core/video-core-in-sight"
 import { VideoCoreInSight } from "@/app/(main)/_features/video-core/video-core-in-sight"
 import { useVideoCoreIOSFullscreenSubtitles } from "@/app/(main)/_features/video-core/video-core-ios-fullscreen-subtitles"
+import { useVideoCoreAsbplayerIntegration } from "@/app/(main)/_features/video-core/video-core-asbplayer"
 import { MediaCaptionsManager } from "@/app/(main)/_features/video-core/video-core-media-captions"
 import { vc_mediaSessionManager, VideoCoreMediaSessionManager } from "@/app/(main)/_features/video-core/video-core-media-session"
 import { useVideoCoreMobileGestures } from "@/app/(main)/_features/video-core/video-core-mobile-gestures"
@@ -99,11 +104,13 @@ import {
     vc_autoPlayVideoAtom,
     vc_autoSkipOPEDAtom,
     vc_beautifyImageAtom,
+    vc_currentPlaybackContextAtom,
     vc_settings,
     vc_showStatsForNerdsAtom,
     vc_storedMutedAtom,
     vc_storedPlaybackRateAtom,
     vc_storedVolumeAtom,
+    vc_subtitleRenderModeAtom,
     VideoCore_VideoPlaybackInfo,
     VideoCore_VideoSource,
     VideoCore_VideoSubtitleTrack,
@@ -197,6 +204,7 @@ export const vc_mediaCaptionsManager = atom<MediaCaptionsManager | null>(null)
 export const vc_audioManager = atom<VideoCoreAudioManager | null>(null)
 export const vc_previewManager = atom<VideoCorePreviewManager | null>(null)
 export const vc_anime4kManager = atom<VideoCoreAnime4KManager | null>(null)
+export const vc_anime4kComparisonManager = atom<VideoCoreAnime4KComparisonManager | null>(null)
 
 export function VideoCoreProvider(props: { id: string, children: React.ReactNode }) {
     const { children } = props
@@ -245,6 +253,7 @@ export function VideoCoreProvider(props: { id: string, children: React.ReactNode
                 vc_audioManager,
                 vc_previewManager,
                 vc_anime4kManager,
+                vc_anime4kComparisonManager,
                 vc_pipManager,
                 vc_fullscreenManager,
                 vc_mediaSessionManager,
@@ -271,6 +280,7 @@ export function VideoCoreProvider(props: { id: string, children: React.ReactNode
                 vc_isSwiping,
                 vc_isMobile,
                 vc_swipeSeekTime,
+                vc_currentPlaybackContextAtom,
             ]}
         >
             {children}
@@ -397,6 +407,7 @@ const PlayerContent = React.memo<PlayerContentProps>(({
                 ref={combineContainerRef}
                 className={cn(
                     "relative w-full h-full bg-black overflow-clip flex items-center justify-center",
+                    "html5-video-player", // YouTube-like class for asbplayer detection
                     (!busy && !isMiniPlayer) && "cursor-none",
                 )}
                 onPointerMove={handleContainerPointerMove}
@@ -488,6 +499,7 @@ const PlayerContent = React.memo<PlayerContentProps>(({
                             <video
                                 data-vc-element="video"
                                 data-video-core-element
+                                className="html5-main-video" // YouTube-like class for asbplayer detection
                                 crossOrigin="anonymous"
                                 preload="auto"
                                 src={streamUrl && !streamUrl.includes(".m3u8") ? streamUrl : undefined}
@@ -536,6 +548,25 @@ const PlayerContent = React.memo<PlayerContentProps>(({
                         </div>
 
                         {!isMobile && <VideoCoreInSight />}
+
+                        {/* HTML Subtitle Overlay - Renders subtitles as DOM elements for external tool compatibility */}
+                        <HtmlSubtitleOverlay />
+
+                        {/* External tool injection point - for browser extensions like asbplayer */}
+                        <div
+                            id="asbplayer-subtitle-container"
+                            data-vc-element="external-overlay"
+                            className="asbplayer-container"
+                            style={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: "100%",
+                                height: "100%",
+                                zIndex: 65,
+                                pointerEvents: "none",
+                            }}
+                        />
 
                         {!isMobile && <VideoCoreTopSection inline={inline}>
                             <VideoCoreTopPlaybackInfo state={state} />
@@ -759,6 +790,8 @@ export function VideoCore(props: VideoCoreProps) {
     const [audioManager, setAudioManager] = useAtom(vc_audioManager)
     const [previewManager, setPreviewManager] = useAtom(vc_previewManager)
     const [anime4kManager, setAnime4kManager] = useAtom(vc_anime4kManager)
+    const [anime4kComparisonManager, setAnime4kComparisonManager] = useAtom(vc_anime4kComparisonManager)
+    const anime4kComparisonEnabled = useAtomValue(vc_anime4kComparisonEnabledAtom)
     const [pipManager, setPipManager] = useAtom(vc_pipManager)
     const setPipElement = useSetAtom(vc_pipElement)
     const [fullscreenManager, setFullscreenManager] = useAtom(vc_fullscreenManager)
@@ -923,6 +956,19 @@ export function VideoCore(props: VideoCoreProps) {
 
     }, [state.playbackInfo?.id])
 
+    // Update current playback context for subtitle offset storage
+    const setCurrentPlaybackContext = useSetAtom(vc_currentPlaybackContextAtom)
+    React.useEffect(() => {
+        if (state.playbackInfo) {
+            setCurrentPlaybackContext({
+                mediaId: state.playbackInfo.media?.id ?? null,
+                episodeNumber: state.playbackInfo.episode?.progressNumber ?? null,
+            })
+        } else {
+            setCurrentPlaybackContext({ mediaId: null, episodeNumber: null })
+        }
+    }, [state.playbackInfo?.id, state.playbackInfo?.media?.id, state.playbackInfo?.episode?.progressNumber])
+
 
     // Re-focus the video element when playback info changes
     React.useEffect(() => {
@@ -1019,6 +1065,8 @@ export function VideoCore(props: VideoCoreProps) {
             setAudioManager(null)
             anime4kManager?.destroy?.()
             setAnime4kManager(null)
+            anime4kComparisonManager?.destroy?.()
+            setAnime4kComparisonManager(null)
             pipManager?.destroy?.()
             setPipManager(null)
             setPipElement(null)
@@ -1237,6 +1285,18 @@ export function VideoCore(props: VideoCoreProps) {
                 },
                 onOptionChanged: (opt) => {
                     setAnime4kOption(opt)
+                },
+            })
+        })
+
+        // Initialize Anime4K Comparison manager
+        setAnime4kComparisonManager(p => {
+            if (p) p.destroy()
+            return new VideoCoreAnime4KComparisonManager({
+                videoElement: v!,
+                settings: settings,
+                onFallback: (message) => {
+                    showOverlayFeedback({ message, duration: 2000 })
                 },
             })
         })
@@ -1563,6 +1623,14 @@ export function VideoCore(props: VideoCoreProps) {
         }
     }, [pipManager, subtitleManager, mediaCaptionsManager, videoRef.current, state.playbackInfo])
 
+    // Update subtitle manager render mode to prevent duplicate rendering
+    const subtitleRenderMode = useAtomValue(vc_subtitleRenderModeAtom)
+    React.useEffect(() => {
+        if (subtitleManager) {
+            subtitleManager.setRenderMode(subtitleRenderMode)
+        }
+    }, [subtitleRenderMode, subtitleManager])
+
     // Update fullscreen manager
     React.useEffect(() => {
         if (fullscreenManager && containerRef.current) {
@@ -1598,6 +1666,11 @@ export function VideoCore(props: VideoCoreProps) {
                 videoRef.current.currentTime = time
             }
         },
+    })
+
+    // Handle asbplayer browser extension integration in fullscreen
+    useVideoCoreAsbplayerIntegration({
+        containerElement: containerRef.current,
     })
 
     // container events
@@ -1703,7 +1776,8 @@ export function VideoCore(props: VideoCoreProps) {
     if (inline) {
         return (
             <ScopeProvider atoms={[__torrentSearch_selectionAtom, __torrentSearch_selectionEpisodeAtom, __torrentSearch_selectedTorrentsAtom]}>
-                <VideoCoreAnime4K />
+                {!anime4kComparisonEnabled && <VideoCoreAnime4K />}
+                <VideoCoreAnime4KComparison />
                 <VideoCorePreferencesModal isWebPlayer={props.id !== "native-player"} />
                 {fullscreen && <RemoveScrollBar />}
                 <div
@@ -1753,7 +1827,8 @@ export function VideoCore(props: VideoCoreProps) {
         <>
             <ScopeProvider atoms={[__torrentSearch_selectionAtom, __torrentSearch_selectionEpisodeAtom, __torrentSearch_selectedTorrentsAtom]}>
 
-                <VideoCoreAnime4K />
+                {!anime4kComparisonEnabled && <VideoCoreAnime4K />}
+                <VideoCoreAnime4KComparison />
                 <VideoCorePreferencesModal isWebPlayer={props.id !== "native-player"} />
                 {state.active && !isMiniPlayer && <RemoveScrollBar />}
 

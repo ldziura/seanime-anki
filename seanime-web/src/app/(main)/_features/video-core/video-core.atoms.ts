@@ -19,7 +19,8 @@ export type VideoCoreSettings = {
     preferredSubtitleLanguage: string
     preferredSubtitleBlacklist: string
     preferredAudioLanguage: string
-    subtitleDelay: number // in seconds
+    subtitleDelay: number // in seconds (primary track)
+    secondarySubtitleDelay: number // in seconds (secondary track)
     // Video enhancement settings
     videoEnhancement: {
         enabled: boolean
@@ -42,6 +43,7 @@ export type VideoCoreSettings = {
     // Caption customization settings (non-ASS)
     captionCustomization: {
         fontSize?: number
+        secondaryFontSize?: number // Independent font size for secondary track (undefined = same as primary)
         textColor?: string
         backgroundColor?: string
         backgroundOpacity?: number
@@ -55,6 +57,7 @@ export const vc_initialSettings: VideoCoreSettings = {
     preferredSubtitleBlacklist: "",
     preferredAudioLanguage: "jpn,jp,jap,japanese",
     subtitleDelay: 0,
+    secondarySubtitleDelay: 0,
     videoEnhancement: {
         enabled: true,
         contrast: 1.05,
@@ -121,6 +124,8 @@ export interface VideoCoreKeybindings {
     takeScreenshot: { key: string }
     openInSight: { key: string }
     statsForNerds: { key: string }
+    ankiMine: { key: string }
+    ankiUpdateLast: { key: string }
 }
 
 export const vc_defaultKeybindings: VideoCoreKeybindings = {
@@ -144,6 +149,8 @@ export const vc_defaultKeybindings: VideoCoreKeybindings = {
     takeScreenshot: { key: "KeyI" },
     openInSight: { key: "KeyH" },
     statsForNerds: { key: "KeyZ" },
+    ankiMine: { key: "Backquote" },
+    ankiUpdateLast: { key: "Backslash" },
 }
 
 const vc_keybindingsRaw = atomWithStorage<Partial<VideoCoreKeybindings>>("sea-video-core-keybindings",
@@ -177,3 +184,100 @@ export const vc_storedVolumeAtom = atomWithStorage("sea-video-core-volume", 1, u
 export const vc_storedMutedAtom = atomWithStorage("sea-video-core-muted", false, undefined, { getOnInit: true })
 export const vc_storedPlaybackRateAtom = atomWithStorage("sea-video-core-playback-rate", 1, undefined, { getOnInit: true })
 export const vc_showStatsForNerdsAtom = atomWithStorage("sea-video-core-show-stats-for-nerds", false, undefined, { getOnInit: true })
+
+// Subtitle render mode: "canvas" uses libass (default), "html" uses DOM-based rendering
+export type SubtitleRenderMode = "canvas" | "html"
+export const vc_subtitleRenderModeAtom = atomWithStorage<SubtitleRenderMode>("sea-vc-subtitleRenderMode", "canvas", undefined, { getOnInit: true })
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Anki Mining Settings
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export interface AnkiSettings {
+    enabled: boolean
+    ankiConnectUrl: string
+    deckName: string
+    modelName: string
+    sentenceField: string
+    audioField: string
+    imageField: string
+    audioPaddingBefore: number // seconds before subtitle start
+    audioPaddingAfter: number // seconds after subtitle end
+}
+
+export const vc_initialAnkiSettings: AnkiSettings = {
+    enabled: false,
+    ankiConnectUrl: "http://127.0.0.1:8765",
+    deckName: "",
+    modelName: "",
+    sentenceField: "",
+    audioField: "",
+    imageField: "",
+    audioPaddingBefore: 0.25,
+    audioPaddingAfter: 0.25,
+}
+
+export const vc_ankiSettingsAtom = atomWithStorage<AnkiSettings>(
+    "sea-video-core-anki-settings",
+    vc_initialAnkiSettings,
+    undefined,
+    { getOnInit: true },
+)
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Persistent Subtitle Offsets
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Storage structure: mediaId -> episodeNumber -> languageCode -> offset (seconds)
+export type SubtitleOffsetStorage = {
+    [mediaId: number]: {
+        [episodeNumber: number]: {
+            [languageCode: string]: number
+        }
+    }
+}
+
+export const vc_subtitleOffsetsAtom = atomWithStorage<SubtitleOffsetStorage>(
+    "sea-subtitle-offsets",
+    {},
+    undefined,
+    { getOnInit: true },
+)
+
+// Current playback info for settings components to access mediaId/episodeNumber
+export type CurrentPlaybackContext = {
+    mediaId: number | null
+    episodeNumber: number | null
+}
+
+export const vc_currentPlaybackContextAtom = atom<CurrentPlaybackContext>({
+    mediaId: null,
+    episodeNumber: null,
+})
+
+// Helper function to look up saved offset with inheritance from previous episodes
+export function getSubtitleOffset(
+    storage: SubtitleOffsetStorage,
+    mediaId: number | null,
+    episodeNumber: number | null,
+    language: string | null,
+): number {
+    if (!mediaId || !episodeNumber || !language) return 0
+
+    const mediaOffsets = storage[mediaId]
+    if (!mediaOffsets) return 0
+
+    // Check current episode first
+    if (mediaOffsets[episodeNumber]?.[language] !== undefined) {
+        return mediaOffsets[episodeNumber][language]
+    }
+
+    // Inherit from most recent previous episode
+    for (let ep = episodeNumber - 1; ep >= 1; ep--) {
+        if (mediaOffsets[ep]?.[language] !== undefined) {
+            return mediaOffsets[ep][language]
+        }
+    }
+
+    return 0
+}

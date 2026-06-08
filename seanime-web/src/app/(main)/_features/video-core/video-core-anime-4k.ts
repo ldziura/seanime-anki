@@ -1,4 +1,5 @@
 import { vc_anime4kManager } from "@/app/(main)/_features/video-core/video-core"
+import { vc_anime4kComparisonEnabledAtom } from "@/app/(main)/_features/video-core/video-core-anime-4k-comparison.atoms"
 import type { Anime4KOption } from "@/app/(main)/_features/video-core/video-core-anime-4k-manager"
 import { vc_realVideoSize } from "@/app/(main)/_features/video-core/video-core-atoms"
 import { vc_seeking } from "@/app/(main)/_features/video-core/video-core-atoms"
@@ -17,6 +18,7 @@ const log = logger("VIDEO CORE ANIME 4K")
 export const vc_anime4kOption = atomWithStorage<Anime4KOption>("sea-video-core-anime4k", "off", undefined, { getOnInit: true })
 
 export const VideoCoreAnime4K = () => {
+    const comparisonEnabled = useAtomValue(vc_anime4kComparisonEnabledAtom)
     const realVideoSize = useAtomValue(vc_realVideoSize)
     const seeking = useAtomValue(vc_seeking)
     const isMiniPlayer = useAtomValue(vc_miniPlayer)
@@ -44,6 +46,17 @@ export const VideoCoreAnime4K = () => {
     // Handle option changes
     React.useEffect(() => {
         if (video && manager) {
+            // Disable single Anime4K mode when comparison mode is active (custom):
+            // force "off" so the single-mode WebGPU pipeline tears down even if this
+            // component stays mounted alongside the comparison view.
+            if (comparisonEnabled) {
+                manager.setOption("off", {
+                    isMiniPlayer,
+                    isPip,
+                    seeking,
+                })
+                return
+            }
             // log.info("Setting Anime4K option", selectedOption)
             manager.setOption(selectedOption, {
                 isMiniPlayer,
@@ -51,7 +64,7 @@ export const VideoCoreAnime4K = () => {
                 seeking,
             })
         }
-    }, [video, manager, selectedOption, isMiniPlayer, isPip, seeking])
+    }, [video, manager, selectedOption, isMiniPlayer, isPip, seeking, comparisonEnabled])
 
     // Handle option changes
     // React.useLayoutEffect(() => {
