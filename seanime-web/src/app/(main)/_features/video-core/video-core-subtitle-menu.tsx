@@ -266,8 +266,14 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
                     value={selectedTrack ?? -1}
                 />
 
-                {/* Secondary Track - Top (only for MKV subtitle tracks) */}
-                {subtitleManager && subtitleTracks.length > 1 && (
+                {/* Secondary Track - Top. Shown whenever the file-based
+                    subtitle manager has at least one track so users can
+                    place a single external subtitle (e.g. Jimaku Japanese)
+                    at the top — useful when the video already has burned-in
+                    subs at the bottom. With one track, the secondary list
+                    becomes useful only when Primary is set to Off (the
+                    filter below excludes the currently-selected primary). */}
+                {subtitleManager && subtitleTracks.length >= 1 && (
                     <>
                         <p className="text-[--muted] text-xs mt-3 mb-1">Secondary (Top)</p>
                         <VideoCoreSettingSelect
