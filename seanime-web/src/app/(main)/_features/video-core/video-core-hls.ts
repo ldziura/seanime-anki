@@ -157,6 +157,17 @@ export function useVideoCoreHls({
                 }))
 
                 setQualityLevels(levels)
+
+                // Start at the MAXIMUM available quality instead of letting ABR
+                // ramp up from the lowest rendition. hls.levels is sorted ascending
+                // by bitrate, so the last index is the highest quality. Pinning
+                // currentLevel disables ABR; the user can re-enable adaptive/lower
+                // quality from the quality menu (qualitySetter, -1 = auto).
+                if (data.levels.length > 0) {
+                    const maxLevel = data.levels.length - 1
+                    hls.currentLevel = maxLevel
+                    hlsLog.info("Starting at max quality level", maxLevel, levels[maxLevel]?.name)
+                }
                 setCurrentQuality(hls.currentLevel)
 
                 // Extract audio tracks

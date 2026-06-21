@@ -225,25 +225,22 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
 
     private async _init() {
         if (!this.libassRenderer) {
+            // Hold a LOCAL handle to the instance we create here. The manager can
+            // be destroy()'d while we await below (rapid episode/stream switch, or
+            // the player reloading when the gateway's server list updates late);
+            // destroy() sets `this.libassRenderer = null`. Reading the field after
+            // an await would then null-deref — that is exactly the crash that
+            // froze the player:
+            //   "TypeError: Cannot read properties of null (reading 'renderer')".
+            // Using a local ref (never nulled) plus an identity re-check after each
+            // await makes init safely abort instead of throwing.
+            let renderer: JASSUB | null = null
             try {
-                // (function () {
-                //     console.log("Worker test")
-                //     const w = new Worker(workerUrl)
-                //
-                //     w.onerror = (e) => {
-                //         console.error("worker crashed:", e.message, "at line", e.lineno)
-                //     }
-                //
-                //     w.onmessage = (e) => {
-                //         console.log("worker replied:", e.data)
-                //     }
-                // })()
-
                 subtitleLog.info("Initializing libass renderer")
 
                 const defaultFontUrl = "/fonts/Roboto-Medium.ttf"
 
-                this.libassRenderer = new JASSUB({
+                renderer = new JASSUB({
                     video: this.videoElement,
                     subContent: this.defaultSubtitleHeader,
                     wasmUrl: wasmUrl,
@@ -256,9 +253,16 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
                     },
                     debug: false,
                 })
+                this.libassRenderer = renderer
 
                 subtitleLog.info("Waiting for libass renderer...")
-                await this.libassRenderer.ready
+                await renderer.ready
+                // Torn down while initializing? destroy() already disposed our
+                // instance and nulled the field — abort before touching .renderer.
+                if (this.libassRenderer !== renderer) {
+                    subtitleLog.info("Subtitle manager torn down during libass init; aborting")
+                    return
+                }
                 subtitleLog.info("Libass renderer ready")
 
 
@@ -271,11 +275,23 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
 
                 this.fonts = [defaultFontUrl, ...this.fonts]
 
-                await this.libassRenderer.renderer.addFonts(this.fonts)
+                await renderer.renderer.addFonts(this.fonts)
+                if (this.libassRenderer !== renderer) {
+                    subtitleLog.info("Subtitle manager torn down during font load; aborting")
+                    return
+                }
             }
             catch (e) {
-                subtitleLog.error("Error initializing libass renderer", e)
-                toast.error("Error initializing libass renderer: " + e)
+                // A teardown race (instance replaced/nulled by destroy() mid-init)
+                // is expected churn — log it quietly. Only a genuine init failure
+                // should surface a toast to the user.
+                const tornDown = renderer !== null && this.libassRenderer !== renderer
+                if (tornDown) {
+                    subtitleLog.info("Libass init aborted by teardown", e)
+                } else {
+                    subtitleLog.error("Error initializing libass renderer", e)
+                    toast.error("Error initializing libass renderer: " + e)
+                }
             }
         }
 
@@ -688,9 +704,14 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
     }
 
     async setSubtitleDelay(subtitleDelay: number) {
-        if (this.libassRenderer) {
-            await this.libassRenderer.ready
-            this.libassRenderer.timeOffset = -subtitleDelay
+        // Local ref + identity re-check: destroy() can null this.libassRenderer
+        // during the `await ready` below, which previously threw the uncaught
+        // "Cannot set properties of null (setting 'timeOffset')".
+        const renderer = this.libassRenderer
+        if (renderer) {
+            await renderer.ready
+            if (this.libassRenderer !== renderer) return
+            renderer.timeOffset = -subtitleDelay
         }
         if (this.pgsRenderer) this.pgsRenderer.setTimeOffset(-subtitleDelay)
     }
