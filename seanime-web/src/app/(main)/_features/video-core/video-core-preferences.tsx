@@ -181,6 +181,7 @@ export function VideoCorePreferencesModal({ isWebPlayer }: { isWebPlayer: boolea
 
     const [settings, setSettings] = useAtom(vc_settings)
     const [editedSubLanguage, setEditedSubLanguage] = useState(settings.preferredSubtitleLanguage)
+    const [editedSecondarySubLanguage, setEditedSecondarySubLanguage] = useState(settings.preferredSecondarySubtitleLanguage)
     const [editedAudioLanguage, setEditedAudioLanguage] = useState(settings.preferredAudioLanguage)
     const [editedSubsBlacklist, setEditedSubsBlacklist] = useState(settings.preferredSubtitleBlacklist)
     const [editedSubtitleDelay, setEditedSubtitleDelay] = useState(settings.subtitleDelay ?? 0)
@@ -195,6 +196,7 @@ export function VideoCorePreferencesModal({ isWebPlayer }: { isWebPlayer: boolea
         if (open) {
             setEditedKeybindings(keybindings)
             setEditedSubLanguage(settings.preferredSubtitleLanguage)
+            setEditedSecondarySubLanguage(settings.preferredSecondarySubtitleLanguage)
             setEditedAudioLanguage(settings.preferredAudioLanguage)
             setEditedSubsBlacklist(settings.preferredSubtitleBlacklist)
             setEditedSubtitleDelay(settings.subtitleDelay ?? 0)
@@ -231,6 +233,7 @@ export function VideoCorePreferencesModal({ isWebPlayer }: { isWebPlayer: boolea
         const newSettings = {
             ...settings,
             preferredSubtitleLanguage: editedSubLanguage,
+            preferredSecondarySubtitleLanguage: editedSecondarySubLanguage,
             preferredAudioLanguage: editedAudioLanguage,
             preferredSubtitleBlacklist: editedSubsBlacklist,
             subtitleDelay: editedSubtitleDelay,
@@ -247,6 +250,7 @@ export function VideoCorePreferencesModal({ isWebPlayer }: { isWebPlayer: boolea
     const handleReset = () => {
         setEditedKeybindings(vc_defaultKeybindings)
         setEditedSubLanguage(vc_initialSettings.preferredSubtitleLanguage)
+        setEditedSecondarySubLanguage(vc_initialSettings.preferredSecondarySubtitleLanguage)
         setEditedAudioLanguage(vc_initialSettings.preferredAudioLanguage)
         setEditedSubsBlacklist(vc_initialSettings.preferredSubtitleBlacklist)
         setEditedSubtitleDelay(vc_initialSettings.subtitleDelay)
@@ -627,6 +631,19 @@ export function VideoCorePreferencesModal({ isWebPlayer }: { isWebPlayer: boolea
                                     placeholder="jpn,eng,kor"
                                     onKeyDown={(e) => e.stopPropagation()}
                                     onInput={(e) => e.stopPropagation()}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-muted-foreground">
+                                    Preferred Secondary Subtitle Language
+                                </label>
+                                <TextInput
+                                    value={editedSecondarySubLanguage}
+                                    onValueChange={setEditedSecondarySubLanguage}
+                                    placeholder="eng,en,english"
+                                    onKeyDown={(e) => e.stopPropagation()}
+                                    onInput={(e) => e.stopPropagation()}
+                                    help="Auto-selected as the dual-sub secondary track on launch. 'none' to disable."
                                 />
                             </div>
                         </div>

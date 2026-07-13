@@ -17,6 +17,10 @@ export type {
 
 export type VideoCoreSettings = {
     preferredSubtitleLanguage: string
+    // Auto-selected as the SECONDARY track on launch (dual subs: e.g. Japanese
+    // primary + English secondary). Same comma-separated matching as the
+    // primary preference; empty or "none" disables auto-selection.
+    preferredSecondarySubtitleLanguage: string
     preferredSubtitleBlacklist: string
     preferredAudioLanguage: string
     subtitleDelay: number // in seconds (primary track)
@@ -54,6 +58,7 @@ export type VideoCoreSettings = {
 
 export const vc_initialSettings: VideoCoreSettings = {
     preferredSubtitleLanguage: "en,eng,english",
+    preferredSecondarySubtitleLanguage: "eng,en,english",
     preferredSubtitleBlacklist: "",
     preferredAudioLanguage: "jpn,jp,jap,japanese",
     subtitleDelay: 0,

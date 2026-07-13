@@ -879,6 +879,41 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
             this.settings.preferredSubtitleLanguage,
             this.settings.preferredSubtitleBlacklist)
         await this.selectTrack(defaultTrackNumber)
+        await this._selectDefaultSecondaryTrack(tracks, defaultTrackNumber)
+    }
+
+    // Auto-selects the default SECONDARY track (dual subs: e.g. Japanese
+    // primary + English secondary) from preferredSecondarySubtitleLanguage.
+    // Unlike the primary default there is deliberately NO fallback-to-first:
+    // when nothing matches, the secondary stays off.
+    private async _selectDefaultSecondaryTrack(
+        tracks: { label?: string, language?: string, number: number, forced?: boolean, default?: boolean }[],
+        primaryTrackNumber: number,
+    ) {
+        if (primaryTrackNumber === NO_TRACK_NUMBER) return // no primary -> dual subs make no sense
+        if (this.secondaryTrackNumber !== NO_TRACK_NUMBER) return // user already chose one
+        const pref = (this.settings.preferredSecondarySubtitleLanguage ?? "").trim()
+        if (!pref || pref.toLowerCase() === "none") return
+
+        const candidates = tracks.filter(t => t.number !== primaryTrackNumber)
+        if (!candidates.length) return
+
+        const preferredLanguages = pref.split(",").map(l => l.trim()).filter(l => l.length > 0)
+        for (const lang of preferredLanguages) {
+            // Exact language code match (e.g. embedded MKV tracks: "eng")
+            let found = candidates.filter(t => t.language?.toLowerCase() === lang.toLowerCase())
+            // Label/language substring match for descriptive names (e.g.
+            // onlinestream tracks: "English (AnimeParadise)") — mirrors the
+            // primary default's >4-char heuristic.
+            if (!found.length && lang.length > 4) {
+                found = candidates.filter(t => (t.label || t.language)?.toLowerCase()?.includes(lang.toLowerCase()))
+            }
+            if (found.length) {
+                subtitleLog.info("Auto-selecting default secondary track", found[0].number, pref)
+                await this.selectSecondaryTrack(found[0].number)
+                return
+            }
+        }
     }
 
     private _handlePgsEvent(event: MKVParser_SubtitleEvent, renderImmediately = true) {
