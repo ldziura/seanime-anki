@@ -505,7 +505,17 @@ export function findSplitAlignment(
     candCues: CueInterval[],
     globalOverlapSeconds: number,
     globalOffsetSeconds: number,
-    opts: CorrelateOptions = {},
+    opts: CorrelateOptions & {
+        /**
+         * Extra seam positions to score, in the *candidate's* timeline. Intended for
+         * AniSkip OP/ED boundaries, which mark exactly where a source-length mismatch
+         * tends to fall. They are scored on the same footing as every swept position and
+         * relax no threshold: a hint that is wrong — AniSkip is sometimes off by a minute
+         * on a freshly aired episode — simply loses. The value is coverage, since the
+         * quantile sweep can step straight over a seam with few cues before it.
+         */
+        seamHintsSeconds?: number[]
+    } = {},
 ): SplitAlignment | null {
     const maxOffset = opts.maxOffsetSeconds ?? 60
     const pulse = opts.pulseSeconds ?? ONSET_PULSE_SECONDS
@@ -554,8 +564,21 @@ export function findSplitAlignment(
     // early in TIME but after only a handful of cues, because a cold open is short and the
     // OP itself carries no dialogue. Starting at 10% of cues would step straight over it.
     const QUANTILE_STEP = 0.03
+    const positions: number[] = []
     for (let q = QUANTILE_STEP; q <= 0.9001; q += QUANTILE_STEP) {
-        const idx = Math.floor(sorted.length * q)
+        positions.push(Math.floor(sorted.length * q))
+    }
+
+    // Hinted positions, mapped from reference/stream time into the candidate's timeline by
+    // undoing the global offset, then snapped to the first cue at or after that instant.
+    for (const hint of opts.seamHintsSeconds ?? []) {
+        if (!Number.isFinite(hint)) continue
+        const inCandidateTime = hint - globalOffsetSeconds
+        const idx = sorted.findIndex(c => c.start >= inCandidateTime)
+        if (idx > 0) positions.push(idx)
+    }
+
+    for (const idx of positions) {
         const cand = scoreAt(idx)
         if (cand && (best === null || cand.overlapSeconds > best.overlapSeconds)) {
             best = cand

@@ -156,6 +156,11 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
     }> = {}
 
     private readonly fetchAndConvertToASS?: (url?: string, content?: string) => Promise<string | undefined>
+    /**
+     * OP/ED boundaries in stream time, read lazily because AniSkip often resolves after the
+     * player has already mounted. Used only to add candidate seam positions to auto-sync.
+     */
+    private readonly getSeamHints?: () => number[]
     // Sends translate request to the server
     private readonly sendTranslateRequest: (text?: string, track?: VideoCore_VideoSubtitleTrack) => void
     private readonly translateFn?: (event: CachedEvent) => void
@@ -196,6 +201,7 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
         playbackInfo,
         settings,
         fetchAndConvertToASS,
+        getSeamHints,
         sendTranslateRequest,
         translateTargetLang,
         hmacToken,
@@ -205,6 +211,7 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
         playbackInfo: VideoCore_VideoPlaybackInfo
         settings: VideoCoreSettings
         fetchAndConvertToASS: (url?: string, content?: string) => Promise<string | undefined>
+        getSeamHints?: () => number[]
         sendTranslateRequest: (text?: string, track?: VideoCore_VideoSubtitleTrack) => void
         translateTargetLang: string | null
         hmacToken?: string
@@ -218,6 +225,7 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
         this.shouldTranslate = translateTargetLang
         this.translationTargetLang = translateTargetLang
         this.fetchAndConvertToASS = fetchAndConvertToASS
+        this.getSeamHints = getSeamHints
         this.sendTranslateRequest = sendTranslateRequest
         this.translateFn = function (cached: CachedEvent) {
             cached.isTranslating = true
@@ -1194,11 +1202,13 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
         let offsetSeconds = best.correlation.offsetSeconds
         if (verdict.accept) {
             const winnerCues = this.syncCueCache.get(best.trackNumber) ?? []
+            const seamHintsSeconds = this.getSeamHints?.() ?? []
             const split = findSplitAlignment(
                 referenceCues,
                 winnerCues,
                 best.correlation.overlapSeconds,
                 best.correlation.offsetSeconds,
+                { seamHintsSeconds },
             )
             if (split) {
                 subtitleLog.info("Auto-sync: split alignment detected", {

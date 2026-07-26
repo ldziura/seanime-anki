@@ -1233,6 +1233,21 @@ export function VideoCore(props: VideoCoreProps) {
                     fetchAndConvertToASS: (url?: string, content?: string) => {
                         return convertSubs({ url: url ?? "", content: content ?? "", to: "ass" })
                     },
+                    // OP/ED boundaries are where a source-length mismatch between the
+                    // stream and a cross-sourced subtitle tends to fall, so they make good
+                    // extra seam candidates for auto-sync. Read through the ref rather than
+                    // captured, because AniSkip frequently resolves after this point.
+                    // Treated as hints only — they are scored like any other position and
+                    // relax nothing, so stale or wrong data just loses.
+                    getSeamHints: () => {
+                        const skip = currentSkipDataRef.current
+                        return [
+                            skip?.op?.interval?.startTime,
+                            skip?.op?.interval?.endTime,
+                            skip?.ed?.interval?.startTime,
+                            skip?.ed?.interval?.endTime,
+                        ].filter((t): t is number => typeof t === "number" && Number.isFinite(t) && t > 0)
+                    },
                     sendTranslateRequest: (text?: string, track?: VideoCore_VideoSubtitleTrack) => {
                         if (text) {
                             dispatchTranslateTextEvent(text)
