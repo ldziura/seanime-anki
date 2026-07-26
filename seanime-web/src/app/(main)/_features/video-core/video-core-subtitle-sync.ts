@@ -389,6 +389,264 @@ export function correlateCues(
 }
 
 // +---------------------------------------------------------------+
+// |                     Split-point alignment                     |
+// +---------------------------------------------------------------+
+
+/**
+ * A cross-sourced subtitle often needs TWO offsets, not one, because the sources disagree
+ * about the opening: a longer/shorter OP, a recap the other lacks, or a trimmed cold open.
+ * Everything before the seam shares one offset and everything after shares another, with a
+ * step of several seconds between them.
+ *
+ * A single global correlation handles this badly. Both alignments are real peaks, so the
+ * scan simply picks whichever segment carries more dialogue — normally the post-OP body —
+ * and the cold open is then wrong by the size of the step. Observed on Youjo Senki S02E03:
+ * -5s before the OP, -15s after it, and the global fit chose -14.8s.
+ */
+export type SplitAlignment = {
+    /** Seam position, in the candidate's own (unshifted) timeline. */
+    atSeconds: number
+    offsetBefore: number
+    offsetAfter: number
+    /** Combined overlap of the two segments, each at its own offset. */
+    overlapSeconds: number
+    /** Combined overlap divided by the best single-offset overlap. Size-dominated; informational. */
+    improvement: number
+    /**
+     * How much better the worse-served segment does at its OWN offset than at the global
+     * one. This, not `improvement`, is the gate: an OP seam leaves only ~10% of cues before
+     * it, so fixing them barely moves the total, but it transforms *that segment*.
+     */
+    segmentGain: number
+    /**
+     * The weaker of the two segments' own lag margins. A dozen-odd cues can align
+     * convincingly to noise; this is what separates a real seam from that.
+     */
+    segmentLagMargin: number
+    cuesBefore: number
+    cuesAfter: number
+}
+
+/** Below this the two halves agree and a seam would be meaningless noise. */
+export const MIN_SPLIT_DELTA_SECONDS = 1.5
+/**
+ * A segment must align this much better at its own offset than at the global one before a
+ * seam is believed. Scale-free, so it works for a small pre-OP segment as well as an even
+ * split — unlike a total-overlap ratio, which a 10%-of-cues segment can never move.
+ */
+export const MIN_SPLIT_SEGMENT_GAIN = 1.5
+
+/** Each segment must also pick its own lag decisively, not merely win by a nose. */
+export const MIN_SPLIT_SEGMENT_LAG_MARGIN = 1.3
+/**
+ * Neither side may be a scrap; too few cues and its "best offset" is meaningless. Kept low
+ * because the pre-OP side is genuinely small — a cold open is often only a dozen or two
+ * lines — and the delta and improvement gates already reject noise.
+ */
+export const MIN_SPLIT_SEGMENT_CUES = 12
+
+/**
+ * Best overlap and lag for one set of pulses against the reference, plus how decisively
+ * that lag beat any rival lag. A segment can be small — a cold open is a dozen-odd lines —
+ * and a handful of pulses will happily align to noise somewhere in a ±60 s window, so the
+ * caller needs to know whether the winning lag actually stood out.
+ */
+function bestLagFor(
+    ref: CueInterval[],
+    pulses: CueInterval[],
+    maxOffset: number,
+    coarseStep: number,
+    fineStep: number,
+): { shift: number, overlap: number, lagMargin: number } {
+    const shifts: number[] = []
+    const overlaps: number[] = []
+    let bestShift = 0
+    let bestOverlap = -1
+
+    for (let shift = -maxOffset; shift <= maxOffset; shift += coarseStep) {
+        const overlap = overlapAt(ref, pulses, shift)
+        shifts.push(shift)
+        overlaps.push(overlap)
+        if (overlap > bestOverlap) {
+            bestOverlap = overlap
+            bestShift = shift
+        }
+    }
+    for (let shift = bestShift - coarseStep; shift <= bestShift + coarseStep; shift += fineStep) {
+        const overlap = overlapAt(ref, pulses, shift)
+        if (overlap > bestOverlap) {
+            bestOverlap = overlap
+            bestShift = shift
+        }
+    }
+
+    let rival = 0
+    for (let i = 0; i < shifts.length; i++) {
+        if (Math.abs(shifts[i] - bestShift) < RIVAL_PEAK_EXCLUSION_SECONDS) continue
+        if (overlaps[i] > rival) rival = overlaps[i]
+    }
+
+    return {
+        shift: Math.round(bestShift * 1000) / 1000,
+        overlap: bestOverlap,
+        lagMargin: rival > 0 ? bestOverlap / rival : Infinity,
+    }
+}
+
+/**
+ * Looks for a single seam that explains the candidate better than one global offset.
+ *
+ * Seams are tried at cue-count quantiles rather than fixed times, which keeps both
+ * segments large enough to align meaningfully regardless of where the dialogue sits.
+ * Only run this on the winning candidate — it costs roughly one full scan per seam tried.
+ */
+export function findSplitAlignment(
+    refCues: CueInterval[],
+    candCues: CueInterval[],
+    globalOverlapSeconds: number,
+    globalOffsetSeconds: number,
+    opts: CorrelateOptions = {},
+): SplitAlignment | null {
+    const maxOffset = opts.maxOffsetSeconds ?? 60
+    const pulse = opts.pulseSeconds ?? ONSET_PULSE_SECONDS
+    const coarseStep = Math.min(opts.coarseStepSeconds ?? 0.1, pulse / 2)
+    const fineStep = opts.fineStepSeconds ?? 0.01
+
+    const ref = toOnsetPulses(refCues, pulse)
+    const sorted = [...candCues].filter(c => c.end > c.start).sort((a, b) => a.start - b.start)
+    if (!ref.length || sorted.length < MIN_SPLIT_SEGMENT_CUES * 2) return null
+
+    // Pure scorer — returns a candidate rather than mutating outer state, so the winner can
+    // be tracked with plain assignments that TypeScript's narrowing can actually follow.
+    const scoreAt = (idx: number): SplitAlignment | null => {
+        if (idx < MIN_SPLIT_SEGMENT_CUES || sorted.length - idx < MIN_SPLIT_SEGMENT_CUES) return null
+
+        const beforePulses = toOnsetPulses(sorted.slice(0, idx), pulse)
+        const afterPulses = toOnsetPulses(sorted.slice(idx), pulse)
+
+        const a = bestLagFor(ref, beforePulses, maxOffset, coarseStep, fineStep)
+        const b = bestLagFor(ref, afterPulses, maxOffset, coarseStep, fineStep)
+        const combined = a.overlap + b.overlap
+
+        // What each segment achieves under the single global offset, for comparison.
+        const beforeAtGlobal = overlapAt(ref, beforePulses, globalOffsetSeconds)
+        const afterAtGlobal = overlapAt(ref, afterPulses, globalOffsetSeconds)
+        const gainBefore = beforeAtGlobal > 0 ? a.overlap / beforeAtGlobal : (a.overlap > 0 ? Infinity : 1)
+        const gainAfter = afterAtGlobal > 0 ? b.overlap / afterAtGlobal : (b.overlap > 0 ? Infinity : 1)
+
+        return {
+            atSeconds: sorted[idx].start,
+            offsetBefore: a.shift,
+            offsetAfter: b.shift,
+            overlapSeconds: combined,
+            improvement: globalOverlapSeconds > 0 ? combined / globalOverlapSeconds : 0,
+            segmentGain: Math.max(gainBefore, gainAfter),
+            segmentLagMargin: Math.min(a.lagMargin, b.lagMargin),
+            cuesBefore: idx,
+            cuesAfter: sorted.length - idx,
+        }
+    }
+
+    let best: SplitAlignment | null = null
+    let bestIdx = -1
+
+    // Coarse sweep by cue-count quantile. It starts very low on purpose: an OP seam sits
+    // early in TIME but after only a handful of cues, because a cold open is short and the
+    // OP itself carries no dialogue. Starting at 10% of cues would step straight over it.
+    const QUANTILE_STEP = 0.03
+    for (let q = QUANTILE_STEP; q <= 0.9001; q += QUANTILE_STEP) {
+        const idx = Math.floor(sorted.length * q)
+        const cand = scoreAt(idx)
+        if (cand && (best === null || cand.overlapSeconds > best.overlapSeconds)) {
+            best = cand
+            bestIdx = idx
+        }
+    }
+    if (best === null) return null
+
+    // Refine to the exact cue: a seam placed a few cues early leaves those cues shifted by
+    // the wrong offset, which is precisely the artefact this feature exists to remove.
+    const span = Math.ceil(sorted.length * QUANTILE_STEP)
+    for (let idx = bestIdx - span; idx <= bestIdx + span; idx++) {
+        if (idx === bestIdx) continue
+        const cand = scoreAt(idx)
+        if (cand && cand.overlapSeconds > best.overlapSeconds) {
+            best = cand
+            bestIdx = idx
+        }
+    }
+
+    if (Math.abs(best.offsetBefore - best.offsetAfter) < MIN_SPLIT_DELTA_SECONDS) return null
+    if (best.segmentGain < MIN_SPLIT_SEGMENT_GAIN) return null
+    if (best.segmentLagMargin < MIN_SPLIT_SEGMENT_LAG_MARGIN) return null
+    return best
+}
+
+/** Formats seconds as an ASS timestamp (`H:MM:SS.cc`). Negatives clamp to zero. */
+function formatAssTimestamp(seconds: number): string {
+    const t = Math.max(0, seconds)
+    const h = Math.floor(t / 3600)
+    const m = Math.floor((t % 3600) / 60)
+    const s = Math.floor(t % 60)
+    const cs = Math.round((t - Math.floor(t)) * 100)
+    // Rounding can carry into the next second.
+    const carry = cs === 100
+    const cs2 = carry ? 0 : cs
+    const s2 = carry ? s + 1 : s
+    return `${h}:${String(m).padStart(2, "0")}:${String(s2 % 60).padStart(2, "0")}.${String(cs2).padStart(2, "0")}`
+}
+
+/**
+ * Shifts every ASS cue starting before `seamSeconds` by `deltaSeconds`, leaving the rest
+ * untouched — the piecewise correction a seam calls for.
+ *
+ * The renderer only offers a single global time offset, so the second offset has to be
+ * baked into the content. Expressing it as a delta relative to the post-seam offset means
+ * the global offset stays the number the user sees and can still nudge by hand.
+ */
+export function shiftAssCuesBefore(content: string, seamSeconds: number, deltaSeconds: number): string {
+    if (!content || !deltaSeconds) return content
+
+    let inEvents = false
+    let startIdx = 1
+    let endIdx = 2
+
+    return content.split(/\r?\n/).map(line => {
+        const trimmed = line.trim()
+
+        if (trimmed.startsWith("[")) {
+            inEvents = trimmed.toLowerCase().startsWith("[events")
+            return line
+        }
+        if (!inEvents) return line
+
+        if (trimmed.toLowerCase().startsWith("format:")) {
+            const fields = trimmed.slice("format:".length).split(",").map(f => f.trim().toLowerCase())
+            const s = fields.indexOf("start")
+            const e = fields.indexOf("end")
+            if (s >= 0) startIdx = s
+            if (e >= 0) endIdx = e
+            return line
+        }
+
+        const lower = trimmed.toLowerCase()
+        if (!lower.startsWith("dialogue:") && !lower.startsWith("comment:")) return line
+
+        const prefixEnd = line.indexOf(":") + 1
+        const prefix = line.slice(0, prefixEnd)
+        const parts = line.slice(prefixEnd).split(",")
+        const start = parseTimestamp(parts[startIdx] ?? "")
+        const end = parseTimestamp(parts[endIdx] ?? "")
+        if (start === null || end === null) return line
+        if (start >= seamSeconds) return line
+
+        parts[startIdx] = formatAssTimestamp(start + deltaSeconds)
+        parts[endIdx] = formatAssTimestamp(end + deltaSeconds)
+        return prefix + parts.join(",")
+    }).join("\n")
+}
+
+// +---------------------------------------------------------------+
 // |                    Selection & acceptance                     |
 // +---------------------------------------------------------------+
 

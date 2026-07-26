@@ -2,7 +2,16 @@ import { getServerBaseUrl } from "@/api/client/server-url"
 import { MKVParser_SubtitleEvent, MKVParser_TrackInfo } from "@/api/generated/types"
 import { VideoCorePgsRenderer } from "@/app/(main)/_features/video-core/video-core-pgs-renderer"
 import { vc_getSubtitleStyle } from "@/app/(main)/_features/video-core/video-core-settings-menu"
-import { CueInterval, parseCues, selectAndAlign, SyncCandidate, SyncSelection } from "@/app/(main)/_features/video-core/video-core-subtitle-sync"
+import {
+    CueInterval,
+    findSplitAlignment,
+    parseCues,
+    selectAndAlign,
+    shiftAssCuesBefore,
+    SplitAlignment,
+    SyncCandidate,
+    SyncSelection,
+} from "@/app/(main)/_features/video-core/video-core-subtitle-sync"
 import { SubtitleRenderMode, VideoCore_VideoPlaybackInfo, VideoCore_VideoSubtitleTrack, VideoCoreSettings } from "@/app/(main)/_features/video-core/video-core.atoms"
 import { logger } from "@/lib/helpers/debug"
 import { detectTrackLanguage } from "@/lib/helpers/language"
@@ -1008,6 +1017,38 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
         return matched
     }
 
+    /**
+     * Rewrites the track's cached ASS so cues before the seam carry the pre-seam offset,
+     * then reloads it into the renderer if that track is on screen. Returns whether the
+     * rewrite happened — the caller must not report the post-seam offset otherwise.
+     */
+    private async _bakePreSeamShift(trackNumber: number, split: SplitAlignment): Promise<boolean> {
+        const fileTrack = this.fileTracks[trackNumber]
+        if (!fileTrack?.content) {
+            subtitleLog.warning("Auto-sync: no cached content to apply the split to", trackNumber)
+            return false
+        }
+
+        const delta = split.offsetBefore - split.offsetAfter
+        const shifted = shiftAssCuesBefore(fileTrack.content, split.atSeconds, delta)
+        if (shifted === fileTrack.content) {
+            subtitleLog.warning("Auto-sync: split rewrite changed nothing", trackNumber)
+            return false
+        }
+
+        this.fileTracks[trackNumber].content = shifted
+        // Invalidate the parsed cues; they no longer describe the stored content.
+        this.syncCueCache.delete(trackNumber)
+
+        if (this.currentTrackNumber === trackNumber && this.renderMode !== "html") {
+            this.libassRenderer?.renderer?.setTrack(shifted)
+            await this._applySubtitleCustomization()
+            await this.libassRenderer?.resize?.()
+        }
+        subtitleLog.info("Auto-sync: applied pre-seam shift", { trackNumber, delta: Number(delta.toFixed(2)) })
+        return true
+    }
+
     /** Rejects if the wrapped promise hasn't settled within AUTO_SYNC_FETCH_TIMEOUT_MS. */
     private _withTimeout<T>(p: Promise<T> | undefined, what: string): Promise<T | undefined> {
         if (!p) return Promise.resolve(undefined)
@@ -1146,14 +1187,46 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
             await this.selectTrack(best.trackNumber)
         }
 
+        // A cross-sourced subtitle often needs two offsets, not one: the sources disagree
+        // about the opening, so everything before the seam is shifted differently from
+        // everything after it. Look for that only on the winner, and only once the file is
+        // trusted — a seam found in a mismatched file is meaningless.
+        let offsetSeconds = best.correlation.offsetSeconds
+        if (verdict.accept) {
+            const winnerCues = this.syncCueCache.get(best.trackNumber) ?? []
+            const split = findSplitAlignment(
+                referenceCues,
+                winnerCues,
+                best.correlation.overlapSeconds,
+                best.correlation.offsetSeconds,
+            )
+            if (split) {
+                subtitleLog.info("Auto-sync: split alignment detected", {
+                    seamAt: Number(split.atSeconds.toFixed(2)),
+                    before: split.offsetBefore,
+                    after: split.offsetAfter,
+                    segmentGain: Number(split.segmentGain.toFixed(2)),
+                    segmentLagMargin: Number(split.segmentLagMargin.toFixed(2)),
+                    cues: `${split.cuesBefore}/${split.cuesAfter}`,
+                })
+                // Keep the post-seam offset as the global delay (it covers most of the
+                // episode and stays the number shown and adjustable in the UI), and bake
+                // the difference into the pre-seam cues.
+                if (await this._bakePreSeamShift(best.trackNumber, split)) {
+                    offsetSeconds = split.offsetAfter
+                }
+            }
+        }
+
         const event: SubtitleManagerAutoSyncEvent = new CustomEvent("autosynced", {
             detail: {
                 applied: verdict.accept,
                 reason: verdict.reason,
                 trackNumber: best.trackNumber,
                 // Same sign convention as `subtitleDelay`: positive means the subtitles
-                // need to appear later.
-                offsetSeconds: best.correlation.offsetSeconds,
+                // need to appear later. With a seam this is the POST-seam offset; the
+                // pre-seam difference is already baked into the cue timings.
+                offsetSeconds,
                 selection,
             },
         })
