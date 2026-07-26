@@ -26,6 +26,12 @@ const DEFAULT_FONT_NAME = "roboto medium"
 // is near the front in practice.
 const MAX_AUTO_SYNC_CANDIDATES = 6
 
+// Per-candidate ceiling on fetching + converting a subtitle. Auto-sync is fire-and-forget,
+// so a request that never settles would strand the whole run with no error and no result —
+// which is exactly what a shared react-query mutation observer did before conversion moved
+// to mutateAsync. A candidate that overruns is simply dropped from scoring.
+const AUTO_SYNC_FETCH_TIMEOUT_MS = 20_000
+
 function hexToASSColor(hex: string, alpha: number = 0): number {
     hex = hex.replace(/^#/, "")
     if (hex.length === 3) {
@@ -1002,6 +1008,18 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
         return matched
     }
 
+    /** Rejects if the wrapped promise hasn't settled within AUTO_SYNC_FETCH_TIMEOUT_MS. */
+    private _withTimeout<T>(p: Promise<T> | undefined, what: string): Promise<T | undefined> {
+        if (!p) return Promise.resolve(undefined)
+        let timer: ReturnType<typeof setTimeout>
+        return Promise.race([
+            p,
+            new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`auto-sync timed out: ${what}`)), AUTO_SYNC_FETCH_TIMEOUT_MS)
+            }),
+        ]).finally(() => clearTimeout(timer)) as Promise<T | undefined>
+    }
+
     /** Cue timings for a track, fetching and parsing its content if needed. */
     private async _cuesForSync(trackNumber: number): Promise<CueInterval[]> {
         const cached = this.syncCueCache.get(trackNumber)
@@ -1027,7 +1045,10 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
                 // scored. The raw fetch is only a fallback for same-origin sources.
                 let content: string | undefined
                 try {
-                    content = await this.fetchAndConvertToASS?.(fileTrack.info.src, undefined)
+                    content = await this._withTimeout(
+                        this.fetchAndConvertToASS?.(fileTrack.info.src, undefined),
+                        `convert track ${trackNumber}`,
+                    )
                 }
                 catch (e) {
                     subtitleLog.warning("Auto-sync: conversion failed for track", trackNumber, e)

@@ -824,7 +824,14 @@ export function VideoCore(props: VideoCoreProps) {
 
     const { mutate: cancelDiscordActivity } = useCancelDiscordActivity()
 
-    const { mutate: convertSubs } = useDirectstreamConvertSubs()
+    // mutateAsync, NOT mutate: a react-query mutation has ONE shared observer, so
+    // concurrent mutate() calls with per-call onSuccess/onError overwrite each other and
+    // every promise but the last hangs forever. Subtitle conversion is genuinely
+    // concurrent here — the primary track, the auto-selected secondary track and
+    // auto-sync's candidate scoring all convert at once — which silently left the primary
+    // track's content unloaded until the user reselected it by hand. mutateAsync returns
+    // an independent promise per call.
+    const { mutateAsync: convertSubs } = useDirectstreamConvertSubs()
 
     const isFirstError = React.useRef(true)
     const shouldDispatchTerminatedOnUnmount = React.useRef(false)
@@ -1195,12 +1202,7 @@ export function VideoCore(props: VideoCoreProps) {
                         : null,
                     settings: settings,
                     fetchAndConvertToVTT: (url?: string, content?: string) => {
-                        return new Promise((resolve, reject) => {
-                            convertSubs({ url: url ?? "", content: content ?? "", to: "vtt" }, {
-                                onSuccess: (data) => resolve(data),
-                                onError: (error) => reject(error),
-                            })
-                        })
+                        return convertSubs({ url: url ?? "", content: content ?? "", to: "vtt" })
                     },
                     sendTranslateRequest: (text?: string, track?: VideoCore_VideoSubtitleTrack) => {
                         if (text) {
@@ -1229,12 +1231,7 @@ export function VideoCore(props: VideoCoreProps) {
                         : null,
                     settings: settings,
                     fetchAndConvertToASS: (url?: string, content?: string) => {
-                        return new Promise((resolve, reject) => {
-                            convertSubs({ url: url ?? "", content: content ?? "", to: "ass" }, {
-                                onSuccess: (data) => resolve(data),
-                                onError: (error) => reject(error),
-                            })
-                        })
+                        return convertSubs({ url: url ?? "", content: content ?? "", to: "ass" })
                     },
                     sendTranslateRequest: (text?: string, track?: VideoCore_VideoSubtitleTrack) => {
                         if (text) {
