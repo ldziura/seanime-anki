@@ -32,6 +32,7 @@ import {
     vc_autoPlayVideoAtom,
     vc_autoSkipOPEDAtom,
     vc_beautifyImageAtom,
+    vc_activeSubtitleSplitAtom,
     vc_currentPlaybackContextAtom,
     vc_highlightOPEDChaptersAtom,
     vc_initialSettings,
@@ -91,6 +92,12 @@ const SUBTITLE_STYLES_SHADOW_DEPTH_OPTIONS = [
     { label: "Medium", value: 2 },
     { label: "Large", value: 3 },
 ]
+
+/** `m:ss` for the split seam marker, so it reads the same way as the scrubber. */
+function formatSeamTime(seconds: number): string {
+    const t = Math.max(0, Math.round(seconds))
+    return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`
+}
 
 export const SUBTITLE_STYLES_BACK_COLOR_OPACITY_OPTIONS = [
     { label: "100%", value: 0 },
@@ -254,6 +261,7 @@ export function VideoCoreSettingsMenu() {
     // Subtitle offset storage for per-media/episode/language persistence
     const [subtitleOffsets, setSubtitleOffsets] = useAtom(vc_subtitleOffsetsAtom)
     const currentPlaybackContext = useAtomValue(vc_currentPlaybackContextAtom)
+    const activeSplit = useAtomValue(vc_activeSubtitleSplitAtom)
 
     const [editedSubCustomization, setEditedSubCustomization] = useState<VideoCoreSettings["subtitleCustomization"]>(
         settings.subtitleCustomization || vc_initialSettings.subtitleCustomization,
@@ -548,6 +556,32 @@ export function VideoCoreSettingsMenu() {
                     </VideoCoreMenuOption>
                     <VideoCoreMenuOption title="Subtitle Delay" icon={MdOutlineAccessTime}>
                         <p className="text-sm text-[--muted] mb-2">Positive values delay subtitles, negative values advance them.</p>
+
+                        {/* A split alignment is otherwise invisible here: the field below shows
+                            one number while a second offset is silently in force before the
+                            seam, which reads as the delay simply being wrong. */}
+                        {activeSplit && activeSplit.trackNumber === (subtitleManager?.getSelectedTrackNumberOrNull?.() ?? -1) && (
+                            <div className="mb-3 rounded-md border border-[--border] bg-[--subtle] px-3 py-2">
+                                <p className="text-xs font-medium">Split alignment active</p>
+                                <p className="text-[--muted] text-xs mt-1">
+                                    This subtitle needed two offsets — the source and the stream disagree about the opening.
+                                </p>
+                                <div className="text-xs mt-2 space-y-0.5">
+                                    <p>
+                                        <span className="text-[--muted]">Before {formatSeamTime(activeSplit.seamStreamSeconds)}: </span>
+                                        {activeSplit.offsetBefore >= 0 ? "+" : ""}{activeSplit.offsetBefore.toFixed(2)}s
+                                    </p>
+                                    <p>
+                                        <span className="text-[--muted]">After {formatSeamTime(activeSplit.seamStreamSeconds)}: </span>
+                                        {activeSplit.offsetAfter >= 0 ? "+" : ""}{activeSplit.offsetAfter.toFixed(2)}s
+                                        <span className="text-[--muted]"> (shown below)</span>
+                                    </p>
+                                </div>
+                                <p className="text-[--muted] text-xs mt-2">
+                                    The difference is baked into the subtitle timings, so adjusting the delay below shifts both parts together.
+                                </p>
+                            </div>
+                        )}
 
                         {/* Primary delay (custom: dual-track) */}
                         <p className="text-[--muted] text-xs mt-2 mb-1">Primary Track</p>

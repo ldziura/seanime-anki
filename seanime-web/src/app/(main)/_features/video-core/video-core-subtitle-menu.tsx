@@ -10,6 +10,7 @@ import { vc_containerElement } from "@/app/(main)/_features/video-core/video-cor
 import {
     getSubtitleOffset,
     hasExplicitSubtitleOffset,
+    vc_activeSubtitleSplitAtom,
     vc_currentPlaybackContextAtom,
     vc_settings,
     vc_subtitleOffsetsAtom,
@@ -52,6 +53,7 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
     const [subtitleOffsets, setSubtitleOffsets] = useAtom(vc_subtitleOffsetsAtom)
     const currentPlaybackContext = useAtomValue(vc_currentPlaybackContextAtom)
     const [settings, setSettings] = useAtom(vc_settings)
+    const setActiveSplit = useSetAtom(vc_activeSubtitleSplitAtom)
 
     // Apply saved offset when track changes
     const applyOffsetForTrack = React.useCallback((trackNumber: number | null, isSecondary: boolean = false) => {
@@ -94,7 +96,8 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
     // Commits an accepted auto-sync measurement: persists it as this episode's offset and
     // applies it live. The manager measures but never writes — the offset store lives here.
     const commitAutoSync = React.useCallback((ev: SubtitleManagerAutoSyncEvent) => {
-        const { applied, reason, trackNumber, offsetSeconds, splitApplied } = ev.detail
+        const { applied, reason, trackNumber, offsetSeconds, appliedSplit } = ev.detail
+        const splitApplied = appliedSplit !== null
         if (!applied) return
 
         const { mediaId, episodeNumber } = currentPlaybackContext
@@ -132,6 +135,19 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
         subtitleManager?.updateSettings(newSettings)
         mediaCaptionsManager?.updateSettings(newSettings)
 
+        // Record the piecewise correction so the settings panel can show both offsets. The
+        // seam is converted to player time (cue time + the applied offset) so it lines up
+        // with the scrubber rather than the subtitle file's own clock.
+        setActiveSplit(appliedSplit
+            ? {
+                trackNumber,
+                trackLabel: track.label || "",
+                offsetBefore: appliedSplit.offsetBefore,
+                offsetAfter: appliedSplit.offsetAfter,
+                seamStreamSeconds: appliedSplit.atSeconds + appliedSplit.offsetAfter,
+            }
+            : null)
+
         // Only announce a correction that actually moved something — a measured 0.00s on
         // an already-correct track is not worth interrupting the episode for.
         if (splitApplied || Math.abs(offsetSeconds) >= 0.05 || trackNumber !== selectedTrack) {
@@ -164,6 +180,8 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
 
     function onTrackChange(trackNumber: number | null) {
         setSelectedTrack(trackNumber)
+        // The rewrite lives in one track's content; any other track is unaffected by it.
+        setActiveSplit(prev => (prev && prev.trackNumber !== trackNumber ? null : prev))
     }
 
     function onSecondaryTrackChange(trackNumber: number | null) {

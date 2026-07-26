@@ -254,6 +254,25 @@ export const vc_subtitleOffsetsAtom = atomWithStorage<SubtitleOffsetStorage>(
     { getOnInit: true },
 )
 
+/**
+ * The piecewise correction currently baked into a subtitle track, or null.
+ *
+ * Session state, deliberately not persisted: it describes a rewrite living in the loaded
+ * track content, which is rebuilt from scratch on every episode load. Exists so a split
+ * stays inspectable after the toast announcing it has gone — otherwise the settings panel
+ * shows one delay and silently omits that a second offset is in force before the seam.
+ */
+export type ActiveSubtitleSplit = {
+    trackNumber: number
+    trackLabel: string
+    offsetBefore: number
+    offsetAfter: number
+    /** Seam position on the player's own timeline, so it matches the scrubber. */
+    seamStreamSeconds: number
+}
+
+export const vc_activeSubtitleSplitAtom = atom<ActiveSubtitleSplit | null>(null)
+
 // Current playback info for settings components to access mediaId/episodeNumber
 export type CurrentPlaybackContext = {
     mediaId: number | null
