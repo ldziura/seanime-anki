@@ -9,6 +9,7 @@ import { vc_videoElement } from "@/app/(main)/_features/video-core/video-core-at
 import { vc_containerElement } from "@/app/(main)/_features/video-core/video-core-atoms"
 import {
     getSubtitleOffset,
+    hasExplicitSubtitleOffset,
     vc_currentPlaybackContextAtom,
     vc_settings,
     vc_subtitleOffsetsAtom,
@@ -17,7 +18,7 @@ import {
 import { VideoCoreControlButtonIcon } from "@/app/(main)/_features/video-core/video-core-control-bar"
 import { MediaCaptionsTrack } from "@/app/(main)/_features/video-core/video-core-media-captions"
 import { VideoCoreMenu, VideoCoreMenuBody, VideoCoreMenuTitle, VideoCoreSettingSelect } from "@/app/(main)/_features/video-core/video-core-menu"
-import { NormalizedTrackInfo } from "@/app/(main)/_features/video-core/video-core-subtitles"
+import { NormalizedTrackInfo, SubtitleManagerAutoSyncEvent } from "@/app/(main)/_features/video-core/video-core-subtitles"
 import { vc_dispatchAction } from "@/app/(main)/_features/video-core/video-core.utils"
 import { IconButton } from "@/components/ui/button"
 import { Tooltip } from "@/components/ui/tooltip"
@@ -27,6 +28,7 @@ import { useAtom, useSetAtom } from "jotai/react"
 import React from "react"
 import { AiFillInfoCircle } from "react-icons/ai"
 import { LuCaptions, LuPaintbrush } from "react-icons/lu"
+import { toast } from "sonner"
 
 export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
     const action = useSetAtom(vc_dispatchAction)
@@ -47,7 +49,7 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
     const [mediaCaptionsTracks, setMediaCaptionsTracks] = React.useState<MediaCaptionsTrack[]>([])
 
     // Subtitle offset persistence
-    const subtitleOffsets = useAtomValue(vc_subtitleOffsetsAtom)
+    const [subtitleOffsets, setSubtitleOffsets] = useAtom(vc_subtitleOffsetsAtom)
     const currentPlaybackContext = useAtomValue(vc_currentPlaybackContextAtom)
     const [settings, setSettings] = useAtom(vc_settings)
 
@@ -88,6 +90,63 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
             }
         }
     }, [currentPlaybackContext, subtitleOffsets, settings, setSettings, subtitleManager, mediaCaptionsManager])
+
+    // Commits an accepted auto-sync measurement: persists it as this episode's offset and
+    // applies it live. The manager measures but never writes — the offset store lives here.
+    const commitAutoSync = React.useCallback((ev: SubtitleManagerAutoSyncEvent) => {
+        const { applied, reason, trackNumber, offsetSeconds } = ev.detail
+        if (!applied) return
+
+        const { mediaId, episodeNumber } = currentPlaybackContext
+        if (!mediaId || !episodeNumber) return
+
+        const track = subtitleManager?.getTrack(trackNumber)
+        if (!track) return
+
+        const language = detectTrackLanguage(track)
+        if (!language) return
+
+        // An offset saved for THIS episode was set deliberately and wins. An inherited
+        // one is only carried over from an earlier episode, so a fresh measurement of
+        // this episode is strictly better information.
+        if (hasExplicitSubtitleOffset(subtitleOffsets, mediaId, episodeNumber, language)) return
+
+        setSubtitleOffsets(prev => ({
+            ...prev,
+            [mediaId]: {
+                ...prev[mediaId],
+                [episodeNumber]: {
+                    ...prev[mediaId]?.[episodeNumber],
+                    [language]: offsetSeconds,
+                },
+            },
+        }))
+
+        const newSettings: VideoCoreSettings = { ...settings, subtitleDelay: offsetSeconds }
+        setSettings(newSettings)
+        subtitleManager?.updateSettings(newSettings)
+        mediaCaptionsManager?.updateSettings(newSettings)
+
+        // Only announce a correction that actually moved something — a measured 0.00s on
+        // an already-correct track is not worth interrupting the episode for.
+        if (Math.abs(offsetSeconds) >= 0.05 || trackNumber !== selectedTrack) {
+            toast.success(`Subtitles synced (${offsetSeconds >= 0 ? "+" : ""}${offsetSeconds.toFixed(2)}s)`, {
+                description: track.label || reason,
+            })
+        }
+    }, [currentPlaybackContext, subtitleOffsets, setSubtitleOffsets, settings, setSettings, subtitleManager, mediaCaptionsManager, selectedTrack])
+
+    // Keep the latest closure in a ref so the listener is registered once per manager
+    // instead of being torn down and re-added on every render.
+    const commitAutoSyncRef = React.useRef(commitAutoSync)
+    commitAutoSyncRef.current = commitAutoSync
+
+    React.useEffect(() => {
+        if (!subtitleManager) return
+        const listener = (ev: SubtitleManagerAutoSyncEvent) => commitAutoSyncRef.current(ev)
+        subtitleManager.addEventListener("autosynced", listener)
+        return () => subtitleManager.removeEventListener("autosynced", listener as EventListener)
+    }, [subtitleManager])
 
     function onTextTrackChange() {
         setSubtitleTracks(p => subtitleManager?.getTracks?.() ?? p)
@@ -242,6 +301,9 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
                         }),
                     ]}
                     onValueChange={(value: number) => {
+                        // An explicit choice takes auto-sync out of the track-selection
+                        // business for the rest of this episode.
+                        subtitleManager?.markUserTrackSelection()
                         if (value === -1) {
                             activeManager?.setNoTrack()
                             setSelectedTrack(null)

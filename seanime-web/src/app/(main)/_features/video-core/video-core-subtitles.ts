@@ -2,6 +2,7 @@ import { getServerBaseUrl } from "@/api/client/server-url"
 import { MKVParser_SubtitleEvent, MKVParser_TrackInfo } from "@/api/generated/types"
 import { VideoCorePgsRenderer } from "@/app/(main)/_features/video-core/video-core-pgs-renderer"
 import { vc_getSubtitleStyle } from "@/app/(main)/_features/video-core/video-core-settings-menu"
+import { CueInterval, parseCues, selectAndAlign, SyncCandidate, SyncSelection } from "@/app/(main)/_features/video-core/video-core-subtitle-sync"
 import { SubtitleRenderMode, VideoCore_VideoPlaybackInfo, VideoCore_VideoSubtitleTrack, VideoCoreSettings } from "@/app/(main)/_features/video-core/video-core.atoms"
 import { logger } from "@/lib/helpers/debug"
 import { detectTrackLanguage } from "@/lib/helpers/language"
@@ -18,6 +19,12 @@ const subtitleLog = logger("VIDEO CORE SUBTITLES")
 
 const NO_TRACK_NUMBER = -1
 const DEFAULT_FONT_NAME = "roboto medium"
+
+// Upper bound on how many subtitle tracks auto-sync will download and score. A Jimaku
+// entry can hold 30+ files; scoring them all would mean 30 conversions before we learn
+// anything. The list is already in the gateway's preference order, so the correct file
+// is near the front in practice.
+const MAX_AUTO_SYNC_CANDIDATES = 6
 
 function hexToASSColor(hex: string, alpha: number = 0): number {
     hex = hex.replace(/^#/, "")
@@ -56,6 +63,23 @@ export type SubtitleManagerTracksLoadedEvent = CustomEvent<{ tracks: NormalizedT
 export type SubtitleManagerDestroyedEvent = CustomEvent
 export type SubtitleManagerSettingsUpdatedEvent = CustomEvent<{ settings: VideoCoreSettings }>
 
+/**
+ * Emitted once per episode when auto-sync finishes measuring.
+ *
+ * The manager deliberately does NOT persist the offset itself — it has no access to the
+ * jotai stores. It reports the measurement and lets the React layer (which already owns
+ * `vc_subtitleOffsetsAtom` and the delay settings) decide what to commit. `applied` is
+ * false when the acceptance policy rejected the result; the payload is still emitted so
+ * the reason can be logged.
+ */
+export type SubtitleManagerAutoSyncEvent = CustomEvent<{
+    applied: boolean
+    reason: string
+    trackNumber: number
+    offsetSeconds: number
+    selection: SyncSelection
+}>
+
 interface VideoCoreSubtitleManagerEventMap {
     "trackselected": SubtitleManagerTrackSelectedEvent
     "trackdeselected": SubtitleManagerTrackDeselectedEvent
@@ -65,6 +89,7 @@ interface VideoCoreSubtitleManagerEventMap {
     "tracksloaded": SubtitleManagerTracksLoadedEvent
     "destroyed": SubtitleManagerDestroyedEvent
     "settingsupdated": SubtitleManagerSettingsUpdatedEvent
+    "autosynced": SubtitleManagerAutoSyncEvent
 }
 
 type CachedEvent = {
@@ -140,6 +165,15 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
     private eventTranslationQueue = new Map<string, CachedEvent>()
     // Remember the translated file tracks to avoid re-fetching them
     private translatedFileTracks = new Map<number, { translating: boolean }>()
+
+    // Auto-sync runs at most once per manager (i.e. once per episode/stream load).
+    private autoSyncStarted = false
+    // Set as soon as the user picks a track by hand. Auto-sync will still measure and
+    // report an offset after that, but it will not move the selection out from under them.
+    private userSelectedTrack = false
+    // Parsed cue timings per track, kept separate from `fileTracks[n].content` so that
+    // scoring never touches what gets handed to the renderer.
+    private syncCueCache = new Map<number, CueInterval[]>()
 
     constructor({
         videoElement,
@@ -577,6 +611,7 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
         this.pgsRenderer = null
         this.eventTranslationQueue.clear()
         this.translatedFileTracks.clear()
+        this.syncCueCache.clear()
         for (const trackNumber in this.eventTracks) {
             this.eventTracks[trackNumber].events.clear()
         }
@@ -880,6 +915,8 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
             this.settings.preferredSubtitleBlacklist)
         await this.selectTrack(defaultTrackNumber)
         await this._selectDefaultSecondaryTrack(tracks, defaultTrackNumber)
+        // Runs after the secondary track is chosen: that track is auto-sync's reference.
+        this._maybeAutoSync()
     }
 
     // Auto-selects the default SECONDARY track (dual subs: e.g. Japanese
@@ -914,6 +951,193 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
                 return
             }
         }
+    }
+
+    // +-----------------------+
+    // |       Auto-sync       |
+    // +-----------------------+
+
+    /**
+     * Records that the user picked a track themselves. Called by the subtitle menu.
+     * After this, auto-sync will still report a measured offset but will never change
+     * the selection — an automatic feature must not fight an explicit choice.
+     */
+    markUserTrackSelection() {
+        this.userSelectedTrack = true
+    }
+
+    private _maybeAutoSync() {
+        if (this.autoSyncStarted) return
+        if (!this.settings.autoSyncSubtitles) return
+        this.autoSyncStarted = true
+        // Fire-and-forget. Scoring costs a few subtitle downloads and must never sit
+        // between the user and playback starting.
+        void this.autoSyncSubtitles().catch(e => subtitleLog.error("Auto-sync failed", e))
+    }
+
+    /**
+     * Returns the tracks matching a comma-separated language preference, in preference
+     * order. Mirrors the matching used for default track selection: an exact language
+     * code (embedded MKV tracks: "jpn"), or — for spelled-out preferences — a substring
+     * of the descriptive label (onlinestream tracks: "Japanese (Jimaku) — ...").
+     */
+    private _matchTracksByLanguagePref(tracks: NormalizedTrackInfo[], pref: string | undefined | null): NormalizedTrackInfo[] {
+        const cleaned = (pref ?? "").trim()
+        if (!cleaned || cleaned.toLowerCase() === "none") return []
+
+        const languages = cleaned.split(",").map(l => l.trim().toLowerCase()).filter(l => l.length > 0)
+        const matched: NormalizedTrackInfo[] = []
+
+        for (const lang of languages) {
+            for (const track of tracks) {
+                if (matched.some(m => m.number === track.number)) continue
+                const code = track.language?.toLowerCase()
+                const label = (track.label || track.language || "").toLowerCase()
+                if (code === lang || (lang.length > 4 && label.includes(lang))) {
+                    matched.push(track)
+                }
+            }
+        }
+
+        return matched
+    }
+
+    /** Cue timings for a track, fetching and parsing its content if needed. */
+    private async _cuesForSync(trackNumber: number): Promise<CueInterval[]> {
+        const cached = this.syncCueCache.get(trackNumber)
+        if (cached) return cached
+
+        let cues: CueInterval[] = []
+
+        const eventTrack = this.eventTracks[trackNumber]
+        if (eventTrack) {
+            // Embedded track — already parsed by the MKV demuxer, in seconds.
+            cues = Array.from(eventTrack.events.values()).map(c => ({
+                start: c.event.startTime,
+                end: c.event.startTime + c.event.duration,
+            }))
+        } else {
+            const fileTrack = this.fileTracks[trackNumber]
+            if (fileTrack?.content) {
+                cues = parseCues(fileTrack.content)
+            } else if (fileTrack?.info?.src) {
+                // Prefer the server-side converter over a browser fetch: it normalizes
+                // every format to ASS *and* retrieves the URL server-side, so subtitle
+                // hosts that send no CORS headers (jimaku.cc among them) can still be
+                // scored. The raw fetch is only a fallback for same-origin sources.
+                let content: string | undefined
+                try {
+                    content = await this.fetchAndConvertToASS?.(fileTrack.info.src, undefined)
+                }
+                catch (e) {
+                    subtitleLog.warning("Auto-sync: conversion failed for track", trackNumber, e)
+                }
+                if (!content) {
+                    try {
+                        content = await fetch(fileTrack.info.src).then(res => res.text())
+                    }
+                    catch (e) {
+                        subtitleLog.warning("Auto-sync: fetch failed for track", trackNumber, e)
+                    }
+                }
+                cues = content ? parseCues(content) : []
+            } else if (fileTrack?.info?.content) {
+                cues = parseCues(fileTrack.info.content)
+            }
+        }
+
+        this.syncCueCache.set(trackNumber, cues)
+        return cues
+    }
+
+    /**
+     * Measures which subtitle track actually matches this episode and by how much it is
+     * offset, using a reference track known to be in sync with the audio.
+     *
+     * Emits an "autosynced" event with the measurement. Applying the offset is left to
+     * the React layer, which owns the persisted per-episode offsets.
+     */
+    async autoSyncSubtitles(): Promise<SyncSelection | null> {
+        const tracks = this._getTracks().filter(t => !isPGS(t.codecID ?? ""))
+        if (tracks.length < 2) return null // need a reference plus at least one candidate
+
+        // The reference must be trusted to match the audio. The secondary track is
+        // exactly that by construction — the provider's own subtitle for the stream being
+        // played, or an embedded track from the same file — so prefer whatever is
+        // already selected there before falling back to the language preference.
+        const referenceTrack = this.secondaryTrackNumber !== NO_TRACK_NUMBER
+            ? tracks.find(t => t.number === this.secondaryTrackNumber)
+            : this._matchTracksByLanguagePref(tracks, this.settings.preferredSecondarySubtitleLanguage)[0]
+
+        if (!referenceTrack) {
+            subtitleLog.info("Auto-sync: no reference track available, skipping")
+            return null
+        }
+
+        const candidateTracks = this._matchTracksByLanguagePref(tracks, this.settings.preferredSubtitleLanguage)
+            .filter(t => t.number !== referenceTrack.number)
+            .slice(0, MAX_AUTO_SYNC_CANDIDATES)
+
+        if (!candidateTracks.length) {
+            subtitleLog.info("Auto-sync: no candidate tracks in the preferred language, skipping")
+            return null
+        }
+
+        subtitleLog.info("Auto-sync: scoring", candidateTracks.length, "candidates against", referenceTrack.label || referenceTrack.language)
+
+        const [referenceCues, candidateCues] = await Promise.all([
+            this._cuesForSync(referenceTrack.number),
+            Promise.all(candidateTracks.map(t => this._cuesForSync(t.number))),
+        ])
+
+        const candidates: SyncCandidate[] = candidateTracks
+            .map((t, i) => ({
+                trackNumber: t.number,
+                label: t.label || t.language || `Track ${t.number}`,
+                cues: candidateCues[i],
+            }))
+            .filter(c => c.cues.length > 0)
+
+        const selection = selectAndAlign(referenceCues, candidates)
+        if (!selection) {
+            subtitleLog.info("Auto-sync: not enough data to measure (sparse reference or no parsable candidate)")
+            return null
+        }
+
+        subtitleLog.info("Auto-sync result", {
+            verdict: selection.verdict,
+            margin: selection.margin,
+            ranked: selection.ranked.map(r => ({
+                label: r.label,
+                offset: r.correlation.offsetSeconds,
+                overlap: Math.round(r.correlation.overlapSeconds),
+                coverage: Number(r.correlation.coverage.toFixed(3)),
+                peakRatio: Number(r.correlation.peakRatio.toFixed(2)),
+            })),
+        })
+
+        const { best, verdict } = selection
+
+        // Switch to the winning file only when the user has not already chosen one.
+        if (verdict.accept && !this.userSelectedTrack && best.trackNumber !== this.currentTrackNumber) {
+            subtitleLog.info("Auto-sync: switching to better-matching track", best.trackNumber, best.label)
+            await this.selectTrack(best.trackNumber)
+        }
+
+        const event: SubtitleManagerAutoSyncEvent = new CustomEvent("autosynced", {
+            detail: {
+                applied: verdict.accept,
+                reason: verdict.reason,
+                trackNumber: best.trackNumber,
+                // Same sign convention as `subtitleDelay`: positive means the subtitles
+                // need to appear later.
+                offsetSeconds: best.correlation.offsetSeconds,
+                selection,
+            },
+        })
+        this.dispatchEvent(event)
+
+        return selection
     }
 
     private _handlePgsEvent(event: MKVParser_SubtitleEvent, renderImmediately = true) {

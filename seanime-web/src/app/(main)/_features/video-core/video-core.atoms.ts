@@ -25,6 +25,10 @@ export type VideoCoreSettings = {
     preferredAudioLanguage: string
     subtitleDelay: number // in seconds (primary track)
     secondarySubtitleDelay: number // in seconds (secondary track)
+    // Measure the primary track against the secondary (reference) track on episode load
+    // and correct both the chosen file and its offset. Only meaningful when subtitles and
+    // audio come from different sources — i.e. online streaming with Jimaku subs.
+    autoSyncSubtitles: boolean
     // Video enhancement settings
     videoEnhancement: {
         enabled: boolean
@@ -63,6 +67,7 @@ export const vc_initialSettings: VideoCoreSettings = {
     preferredAudioLanguage: "jpn,jp,jap,japanese",
     subtitleDelay: 0,
     secondarySubtitleDelay: 0,
+    autoSyncSubtitles: true,
     videoEnhancement: {
         enabled: true,
         contrast: 1.05,
@@ -285,4 +290,22 @@ export function getSubtitleOffset(
     }
 
     return 0
+}
+
+/**
+ * Whether an offset was stored for *this exact episode*, as opposed to being inherited
+ * from an earlier one by `getSubtitleOffset`.
+ *
+ * Auto-sync uses this to decide precedence. An explicit value means the user tuned this
+ * episode by hand and must not be overridden; an inherited value is only a carried-over
+ * guess, which a fresh measurement should be allowed to replace.
+ */
+export function hasExplicitSubtitleOffset(
+    storage: SubtitleOffsetStorage,
+    mediaId: number | null,
+    episodeNumber: number | null,
+    language: string | null,
+): boolean {
+    if (!mediaId || !episodeNumber || !language) return false
+    return storage[mediaId]?.[episodeNumber]?.[language] !== undefined
 }
