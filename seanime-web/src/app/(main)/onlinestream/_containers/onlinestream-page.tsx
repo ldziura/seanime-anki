@@ -45,6 +45,7 @@ import { Popover, PopoverProps } from "@/components/ui/popover"
 import { Select } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logger, useLatestFunction } from "@/lib/helpers/debug"
+import { detectTrackLanguage } from "@/lib/helpers/language"
 import { usePathname, useRouter, useSearchParams } from "@/lib/navigation"
 import { useWindowSize } from "@uidotdev/usehooks"
 import { AxiosError } from "axios"
@@ -827,11 +828,21 @@ export function OnlinestreamPage({ animeEntry, animeEntryLoading, hideBackButton
                                             streamType: overrideStreamType
                                                 ? overrideStreamType
                                                 : ((url && isHLSSrc(url)) || videoSource?.type === "m3u8") ? "hls" : "native",
+                                            // The backend's onlinestream Subtitle carries a single
+                                            // string field, so providers put the human-readable name
+                                            // there (e.g. "Japanese (Jimaku) — <filename>"). Feeding
+                                            // that straight into `language` conflates the two: every
+                                            // exact language-code comparison misses, and everything
+                                            // downstream that needs a real code (default-track
+                                            // selection, the per-episode subtitle offset key) is left
+                                            // guessing from the label. Keep the descriptive string as
+                                            // the label — it is the only way to tell several Jimaku
+                                            // candidates apart — and resolve a proper code alongside it.
                                             subtitleTracks: videoSource?.subtitles?.map((sub, index) => ({
                                                 index: index,
                                                 label: sub.language,
                                                 src: sub.url,
-                                                language: sub.language,
+                                                language: detectTrackLanguage({ label: sub.language }) ?? sub.language,
                                                 default: index === 0,
                                                 useLibassRenderer: useLibassRenderer,
                                             })),
