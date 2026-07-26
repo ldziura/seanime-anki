@@ -557,30 +557,14 @@ export function VideoCoreSettingsMenu() {
                     <VideoCoreMenuOption title="Subtitle Delay" icon={MdOutlineAccessTime}>
                         <p className="text-sm text-[--muted] mb-2">Positive values delay subtitles, negative values advance them.</p>
 
-                        {/* A split alignment is otherwise invisible here: the field below shows
-                            one number while a second offset is silently in force before the
-                            seam, which reads as the delay simply being wrong. */}
+                        {/* A split is otherwise invisible here: the field below shows one number
+                            while a second offset applies before the seam. One line is enough. */}
                         {activeSplit && activeSplit.trackNumber === (subtitleManager?.getSelectedTrackNumberOrNull?.() ?? -1) && (
-                            <div className="mb-3 rounded-md border border-[--border] bg-[--subtle] px-3 py-2">
-                                <p className="text-xs font-medium">Split alignment active</p>
-                                <p className="text-[--muted] text-xs mt-1">
-                                    This subtitle needed two offsets — the source and the stream disagree about the opening.
-                                </p>
-                                <div className="text-xs mt-2 space-y-0.5">
-                                    <p>
-                                        <span className="text-[--muted]">Before {formatSeamTime(activeSplit.seamStreamSeconds)}: </span>
-                                        {activeSplit.offsetBefore >= 0 ? "+" : ""}{activeSplit.offsetBefore.toFixed(2)}s
-                                    </p>
-                                    <p>
-                                        <span className="text-[--muted]">After {formatSeamTime(activeSplit.seamStreamSeconds)}: </span>
-                                        {activeSplit.offsetAfter >= 0 ? "+" : ""}{activeSplit.offsetAfter.toFixed(2)}s
-                                        <span className="text-[--muted]"> (shown below)</span>
-                                    </p>
-                                </div>
-                                <p className="text-[--muted] text-xs mt-2">
-                                    The difference is baked into the subtitle timings, so adjusting the delay below shifts both parts together.
-                                </p>
-                            </div>
+                            <p className="text-xs text-[--muted] mb-2">
+                                <span className="text-[--foreground] font-medium">Split</span>
+                                {" "}{activeSplit.offsetBefore.toFixed(2)}s before {formatSeamTime(activeSplit.seamStreamSeconds)},
+                                {" "}{activeSplit.offsetAfter.toFixed(2)}s after
+                            </p>
                         )}
 
                         {/* Primary delay (custom: dual-track) */}
