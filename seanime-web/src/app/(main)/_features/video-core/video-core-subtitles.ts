@@ -1119,7 +1119,7 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
             }))
             .filter(c => c.cues.length > 0)
 
-        const selection = selectAndAlign(referenceCues, candidates)
+        const selection = selectAndAlign(referenceCues, candidates, {}, this.currentTrackNumber)
         if (!selection) {
             subtitleLog.info("Auto-sync: not enough data to measure (sparse reference or no parsable candidate)")
             return null
@@ -1134,6 +1134,7 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
                 overlap: Math.round(r.correlation.overlapSeconds),
                 coverage: Number(r.correlation.coverage.toFixed(3)),
                 peakRatio: Number(r.correlation.peakRatio.toFixed(2)),
+                lagMargin: Number(r.correlation.lagMargin.toFixed(2)),
             })),
         })
 

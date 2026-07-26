@@ -85,6 +85,22 @@ export const MIN_PEAK_RATIO = 2.5
 export const MIN_COVERAGE = 0.35
 
 /**
+ * How far from the winning lag a rival peak has to be before it counts as a genuinely
+ * different alignment rather than the shoulder of the same one. The main lobe is about one
+ * pulse wide; 2 s clears it with room to spare.
+ */
+const RIVAL_PEAK_EXCLUSION_SECONDS = 2.0
+
+/**
+ * Minimum ratio between the winning peak and the best rival peak elsewhere in the search
+ * window. This is the gate that peakRatio cannot provide: peakRatio only says "a peak
+ * exists", not "this is the RIGHT peak". Observed live on Youjo Senki S02E03, where the
+ * measurement cleared peakRatio and coverage yet aligned to -14 s when the truth was
+ * ~-2.5 s — two comparable peaks, and nothing in the metrics said so.
+ */
+export const MIN_LAG_MARGIN = 1.35
+
+/**
  * Below this, the runner-up scored close enough that the two candidates are not really
  * distinguishable. Annotated on the verdict but deliberately never used to reject.
  */
@@ -262,6 +278,8 @@ export type SyncCorrelation = {
     coverage: number
     /** Peak divided by the mean across the whole search window. How *sharp* the peak is. */
     peakRatio: number
+    /** Peak divided by the best rival peak at a different lag. Answers "is THIS lag right?" */
+    lagMargin: number
     /** True when the peak sits at the edge of the search window — usually means no real peak exists. */
     atSearchEdge: boolean
     refCueCount: number
@@ -308,21 +326,25 @@ export function correlateCues(
         overlapSeconds: 0,
         coverage: 0,
         peakRatio: 0,
+        lagMargin: 0,
         atSearchEdge: false,
         refCueCount: refCues.length,
         candCueCount: candCues.length,
     }
     if (!ref.length || !cand.length) return empty
 
+    // Keep every coarse sample so a rival peak can be found afterwards.
+    const shifts: number[] = []
+    const overlaps: number[] = []
     let bestShift = 0
     let bestOverlap = -1
     let sum = 0
-    let samples = 0
 
     for (let shift = -maxOffset; shift <= maxOffset; shift += coarseStep) {
         const overlap = overlapAt(ref, cand, shift)
+        shifts.push(shift)
+        overlaps.push(overlap)
         sum += overlap
-        samples++
         if (overlap > bestOverlap) {
             bestOverlap = overlap
             bestShift = shift
@@ -338,7 +360,18 @@ export function correlateCues(
         }
     }
 
-    const meanOverlap = samples > 0 ? sum / samples : 0
+    // The strongest rival peak at a genuinely DIFFERENT lag. peakRatio compares the peak
+    // to the window mean, which a spurious alignment can clear comfortably while an
+    // equally good alignment sits elsewhere — the peak looks tall but says nothing about
+    // WHICH lag is right. Excluding a window around the winner (well beyond the main
+    // lobe, which is only ~one pulse wide) isolates that question.
+    let rivalOverlap = 0
+    for (let i = 0; i < shifts.length; i++) {
+        if (Math.abs(shifts[i] - bestShift) < RIVAL_PEAK_EXCLUSION_SECONDS) continue
+        if (overlaps[i] > rivalOverlap) rivalOverlap = overlaps[i]
+    }
+
+    const meanOverlap = shifts.length > 0 ? sum / shifts.length : 0
     const denominator = Math.min(totalSeconds(ref), totalSeconds(cand))
 
     return {
@@ -348,6 +381,7 @@ export function correlateCues(
         overlapSeconds: bestOverlap,
         coverage: denominator > 0 ? bestOverlap / denominator : 0,
         peakRatio: meanOverlap > 0 ? bestOverlap / meanOverlap : 0,
+        lagMargin: rivalOverlap > 0 ? bestOverlap / rivalOverlap : Infinity,
         atSearchEdge: Math.abs(Math.abs(bestShift) - maxOffset) < coarseStep,
         refCueCount: refCues.length,
         candCueCount: candCues.length,
@@ -436,6 +470,15 @@ export function evaluateSyncConfidence(selection: {
     if (c.coverage < MIN_COVERAGE) {
         return { accept: false, reason: `too few onsets matched (${(c.coverage * 100).toFixed(0)}%)` }
     }
+    // A tall peak is not the same as the RIGHT peak. If some other lag scores nearly as
+    // well, the measurement cannot say which is correct, and applying either is a coin
+    // flip dressed up as a result.
+    if (c.lagMargin < MIN_LAG_MARGIN) {
+        return {
+            accept: false,
+            reason: `alignment ambiguous — a rival lag scores almost as well (${c.lagMargin.toFixed(2)}x)`,
+        }
+    }
 
     // Note what margin is NOT used for: rejection. A margin near 1.0 legitimately means
     // "two candidates are equally good" — most often the same file listed twice under
@@ -464,6 +507,8 @@ export function selectAndAlign(
     reference: CueInterval[],
     candidates: SyncCandidate[],
     opts: CorrelateOptions = {},
+    /** Track currently on screen; kept in a tie rather than switching arbitrarily. */
+    preferTrackNumber?: number | null,
 ): SyncSelection | null {
     if (!candidates.length) return null
     if (reference.length < MIN_REFERENCE_CUES) return null
@@ -476,11 +521,20 @@ export function selectAndAlign(
         }))
         .sort((a, b) => b.correlation.overlapSeconds - a.correlation.overlapSeconds)
 
-    const best = ranked[0]
+    let best = ranked[0]
     const runnerUp = ranked[1] ?? null
     const margin = runnerUp && runnerUp.correlation.overlapSeconds > 0
         ? best.correlation.overlapSeconds / runnerUp.correlation.overlapSeconds
         : Infinity
+
+    // When the top candidates are effectively tied, "best" is arbitrary — commonly the same
+    // release offered as both .srt and .ass. Switching the user's track on that basis
+    // changes what they see for no measured benefit, so prefer the track already selected
+    // and report ITS offset (which is what will actually be rendered).
+    if (preferTrackNumber != null && margin < MIN_UNAMBIGUOUS_MARGIN) {
+        const incumbent = ranked.find(r => r.trackNumber === preferTrackNumber)
+        if (incumbent) best = incumbent
+    }
 
     return {
         best,
