@@ -92,6 +92,13 @@ export type SubtitleManagerAutoSyncEvent = CustomEvent<{
     reason: string
     trackNumber: number
     offsetSeconds: number
+    /**
+     * True when a seam was found and the pre-seam cues were rewritten in the track content.
+     * The rewrite is expressed RELATIVE to `offsetSeconds`, so that value is no longer a
+     * free parameter — a listener must apply it even if it would otherwise defer to a
+     * stored offset, or the pre-seam segment ends up shifted against the wrong baseline.
+     */
+    splitApplied: boolean
     selection: SyncSelection
 }>
 
@@ -1200,6 +1207,7 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
         // everything after it. Look for that only on the winner, and only once the file is
         // trusted — a seam found in a mismatched file is meaningless.
         let offsetSeconds = best.correlation.offsetSeconds
+        let splitApplied = false
         if (verdict.accept) {
             const winnerCues = this.syncCueCache.get(best.trackNumber) ?? []
             const seamHintsSeconds = this.getSeamHints?.() ?? []
@@ -1224,6 +1232,7 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
                 // the difference into the pre-seam cues.
                 if (await this._bakePreSeamShift(best.trackNumber, split)) {
                     offsetSeconds = split.offsetAfter
+                    splitApplied = true
                 }
             }
         }
@@ -1237,6 +1246,7 @@ Style: Default, Roboto Medium,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0
                 // need to appear later. With a seam this is the POST-seam offset; the
                 // pre-seam difference is already baked into the cue timings.
                 offsetSeconds,
+                splitApplied,
                 selection,
             },
         })

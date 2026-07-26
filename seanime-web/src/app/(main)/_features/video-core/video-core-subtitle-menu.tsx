@@ -94,7 +94,7 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
     // Commits an accepted auto-sync measurement: persists it as this episode's offset and
     // applies it live. The manager measures but never writes — the offset store lives here.
     const commitAutoSync = React.useCallback((ev: SubtitleManagerAutoSyncEvent) => {
-        const { applied, reason, trackNumber, offsetSeconds } = ev.detail
+        const { applied, reason, trackNumber, offsetSeconds, splitApplied } = ev.detail
         if (!applied) return
 
         const { mediaId, episodeNumber } = currentPlaybackContext
@@ -109,7 +109,12 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
         // An offset saved for THIS episode was set deliberately and wins. An inherited
         // one is only carried over from an earlier episode, so a fresh measurement of
         // this episode is strictly better information.
-        if (hasExplicitSubtitleOffset(subtitleOffsets, mediaId, episodeNumber, language)) return
+        //
+        // The exception is a split: the track's pre-seam cues have already been rewritten
+        // relative to this offset, so deferring to a stored value would leave the two
+        // segments calibrated against different baselines — the cold open would land wrong
+        // by the difference, which is far more confusing than a replaced preference.
+        if (!splitApplied && hasExplicitSubtitleOffset(subtitleOffsets, mediaId, episodeNumber, language)) return
 
         setSubtitleOffsets(prev => ({
             ...prev,
@@ -129,9 +134,14 @@ export function VideoCoreSubtitleMenu({ inline }: { inline?: boolean }) {
 
         // Only announce a correction that actually moved something — a measured 0.00s on
         // an already-correct track is not worth interrupting the episode for.
-        if (Math.abs(offsetSeconds) >= 0.05 || trackNumber !== selectedTrack) {
-            toast.success(`Subtitles synced (${offsetSeconds >= 0 ? "+" : ""}${offsetSeconds.toFixed(2)}s)`, {
-                description: track.label || reason,
+        if (splitApplied || Math.abs(offsetSeconds) >= 0.05 || trackNumber !== selectedTrack) {
+            const headline = splitApplied
+                ? `Subtitles synced (${offsetSeconds >= 0 ? "+" : ""}${offsetSeconds.toFixed(2)}s, split)`
+                : `Subtitles synced (${offsetSeconds >= 0 ? "+" : ""}${offsetSeconds.toFixed(2)}s)`
+            toast.success(headline, {
+                description: splitApplied
+                    ? "Opening mismatch corrected separately — " + (track.label || reason)
+                    : (track.label || reason),
             })
         }
     }, [currentPlaybackContext, subtitleOffsets, setSubtitleOffsets, settings, setSettings, subtitleManager, mediaCaptionsManager, selectedTrack])
